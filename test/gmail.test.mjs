@@ -165,6 +165,10 @@ test('buildGmailReplyDraftInput and buildGmailDraftHtml format content', () => {
   assert.match(input, /Buyer/);
   assert.match(html, /AI返信案/);
   assert.match(html, /<br>/);
+  assert.match(html, /stststststststststststststststststststststst/);
+  assert.match(html, /SUEHIRO TRADING Co\., Ltd\./);
+  assert.match(html, /https:\/\/suehirotrd\.com\/sales\//);
+  assert.match(html, /Tokyo, Japan\. 111-0032/);
 });
 
 test('pollGmailMailbox saves first-run baseline from profile', async () => {

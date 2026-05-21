@@ -1,6 +1,14 @@
 import { getValidAccessToken } from './google-drive.mjs';
 
 const GMAIL_BASE_URL = 'https://gmail.googleapis.com/gmail/v1/users/me';
+const SUEHIRO_EMAIL_SIGNATURE_LINES = [
+  'stststststststststststststststststststststst',
+  'SUEHIRO TRADING Co., Ltd.',
+  'Web : https://suehirotrd.com/sales/',
+  '',
+  '1-13-5-C63 Asakusa, Taito-ku,',
+  'Tokyo, Japan. 111-0032'
+];
 export const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.compose'
@@ -138,8 +146,14 @@ export function buildGmailDraftHtml(replyText) {
   return [
     '<p><strong>AI返信案です。送信前に必ず内容を確認してください。</strong></p>',
     '<hr>',
-    textToHtml(replyText)
+    textToHtml(replyText),
+    '<br>',
+    buildSuehiroEmailSignatureHtml()
   ].join('\n');
+}
+
+export function buildSuehiroEmailSignatureHtml() {
+  return textToHtml(SUEHIRO_EMAIL_SIGNATURE_LINES.join('\n'));
 }
 
 export function buildReplyMime(message, htmlBody) {
