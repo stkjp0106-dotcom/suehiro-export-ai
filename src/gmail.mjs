@@ -11,7 +11,8 @@ const SUEHIRO_EMAIL_SIGNATURE_LINES = [
 ];
 export const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
-  'https://www.googleapis.com/auth/gmail.compose'
+  'https://www.googleapis.com/auth/gmail.compose',
+  'https://www.googleapis.com/auth/gmail.modify'
 ].join(' ');
 
 export async function getGmailAccessToken(config, fetchImpl = fetch) {
@@ -104,6 +105,24 @@ export async function createGmailReplyDraft(originalMessage, htmlBody, accessTok
         threadId: originalMessage.threadId
       }
     }
+  });
+}
+
+export async function findGmailLabelId(labelName, accessToken, fetchImpl = fetch) {
+  const data = await gmailRequest('/labels', accessToken, { fetchImpl });
+  const label = (data.labels || []).find((item) => item.name === labelName);
+  return label?.id || '';
+}
+
+export async function addGmailLabels(messageId, labelIds, accessToken, fetchImpl = fetch) {
+  if (!messageId || !labelIds.length) {
+    return null;
+  }
+
+  return gmailRequest(`/messages/${encodeURIComponent(messageId)}/modify`, accessToken, {
+    method: 'POST',
+    fetchImpl,
+    body: { addLabelIds: labelIds }
   });
 }
 

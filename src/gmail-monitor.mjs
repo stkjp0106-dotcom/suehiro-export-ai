@@ -1,9 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
+  addGmailLabels,
   buildGmailDraftHtml,
   buildGmailReplyDraftInput,
   createGmailReplyDraft as createGmailApiReplyDraft,
+  findGmailLabelId,
   getGmailAccessToken,
   getGmailMessage,
   getGmailProfile,
@@ -13,6 +15,7 @@ import {
 
 const OPENAI_RESPONSES_API_URL = 'https://api.openai.com/v1/responses';
 const DEFAULT_STATE_PATH = '.state/gmail-monitor.json';
+const DEFAULT_DRAFT_LABEL_NAME = 'AI Reply';
 
 const GMAIL_REPLY_INSTRUCTIONS = [
   'You are SUEHIRO AI, a careful email assistant for SUEHIRO TRADING.',
@@ -30,6 +33,7 @@ export function getGmailMonitorConfig(env = process.env) {
     mailbox: env.GMAIL_MAILBOX || env.OUTLOOK_MAILBOX || 'sales@suehirotrd.com',
     pollSeconds: Number(env.GMAIL_POLL_SECONDS || env.OUTLOOK_POLL_SECONDS || 60),
     statePath: env.GMAIL_STATE_PATH || join(env.DATA_DIR || '.', DEFAULT_STATE_PATH),
+    draftLabelName: env.GMAIL_DRAFT_LABEL_NAME || DEFAULT_DRAFT_LABEL_NAME,
     processExistingOnFirstRun: env.GMAIL_PROCESS_EXISTING_ON_FIRST_RUN === 'true',
     openaiApiKey: env.OPENAI_API_KEY,
     openaiModel: env.OPENAI_MODEL || 'gpt-4o-mini',
@@ -143,6 +147,16 @@ export async function processGmailMessage(message, config, accessToken, options 
     accessToken,
     options.fetchImpl
   );
+  const draftMessageId = draft.message?.id || draft.messageId || '';
+  if (config.draftLabelName && draftMessageId) {
+    const labelId = await findGmailLabelId(config.draftLabelName, accessToken, options.fetchImpl);
+    if (labelId) {
+      await addGmailLabels(draftMessageId, [labelId], accessToken, options.fetchImpl);
+      logger.info(`Gmail draft labeled: draftMessageId=${draftMessageId} label=${JSON.stringify(config.draftLabelName)}`);
+    } else {
+      logger.warn(`Gmail draft label not found: ${JSON.stringify(config.draftLabelName)}`);
+    }
+  }
 
   logger.info(`Gmail draft saved: originalMessageId=${normalized.id} draftId=${draft.id}`);
   return { draftId: draft.id };

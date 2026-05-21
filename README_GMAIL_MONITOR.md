@@ -24,6 +24,7 @@ Set these in Railway Variables:
 GMAIL_MAILBOX=sales@suehirotrd.com
 GMAIL_POLL_SECONDS=60
 GMAIL_STATE_PATH=.state/gmail-monitor.json
+GMAIL_DRAFT_LABEL_NAME=AI Reply
 GMAIL_PROCESS_EXISTING_ON_FIRST_RUN=false
 OPENAI_API_KEY=your_openai_api_key
 OPENAI_MODEL=gpt-5.4-mini
@@ -46,6 +47,7 @@ The OAuth consent must include:
 
 - `https://www.googleapis.com/auth/gmail.readonly`
 - `https://www.googleapis.com/auth/gmail.compose`
+- `https://www.googleapis.com/auth/gmail.modify`
 
 To get the refresh token locally:
 
@@ -62,7 +64,8 @@ Open `http://localhost:3002/`, sign in as the Google account that owns `sales@su
 3. Fetch the full message.
 4. Ask OpenAI to create a reply draft.
 5. Create a Gmail draft in the same thread.
-6. Save the Gmail history ID and processed message IDs.
+6. Add the `AI Reply` label to the draft message.
+7. Save the Gmail history ID and processed message IDs.
 
 On the first run, the worker saves a baseline history ID and does not create drafts for existing Inbox mail unless `GMAIL_PROCESS_EXISTING_ON_FIRST_RUN=true`.
 

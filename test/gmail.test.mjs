@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  addGmailLabels,
   buildGmailDraftHtml,
   buildGmailReplyDraftInput,
   buildReplyMime,
   createGmailReplyDraft,
+  findGmailLabelId,
   getGmailAccessToken,
   listGmailHistory,
   normalizeGmailMessage
@@ -58,6 +60,34 @@ test('listGmailHistory returns inbox message additions and next historyId', asyn
   assert.match(calls[0], /historyTypes=messageAdded/);
   assert.equal(result.historyId, '120');
   assert.deepEqual(result.messages.map((message) => message.id), ['message-1']);
+});
+
+test('findGmailLabelId locates the AI Reply label', async () => {
+  const labelId = await findGmailLabelId('AI Reply', 'gmail-token', async (url) => {
+    assert.match(String(url), /\/gmail\/v1\/users\/me\/labels$/);
+    return {
+      ok: true,
+      json: async () => ({
+        labels: [
+          { id: 'Label_1', name: 'Customers' },
+          { id: 'Label_2', name: 'AI Reply' }
+        ]
+      })
+    };
+  });
+
+  assert.equal(labelId, 'Label_2');
+});
+
+test('addGmailLabels calls Gmail modify endpoint', async () => {
+  const result = await addGmailLabels('message-id', ['Label_2'], 'gmail-token', async (url, options) => {
+    assert.match(String(url), /\/messages\/message-id\/modify$/);
+    assert.equal(options.method, 'POST');
+    assert.deepEqual(JSON.parse(options.body).addLabelIds, ['Label_2']);
+    return { ok: true, json: async () => ({ id: 'message-id', labelIds: ['DRAFT', 'Label_2'] }) };
+  });
+
+  assert.deepEqual(result.labelIds, ['DRAFT', 'Label_2']);
 });
 
 test('normalizeGmailMessage extracts headers and text body', () => {
@@ -256,7 +286,16 @@ test('pollGmailMailbox creates a draft for a new inbox message', async () => {
         return { ok: true, json: async () => ({ output_text: 'Draft reply' }) };
       }
       if (String(url).endsWith('/drafts')) {
-        return { ok: true, json: async () => ({ id: 'draft-id' }) };
+        return { ok: true, json: async () => ({ id: 'draft-id', message: { id: 'draft-message-id' } }) };
+      }
+      if (String(url).endsWith('/labels')) {
+        return {
+          ok: true,
+          json: async () => ({ labels: [{ id: 'Label_2', name: 'AI Reply' }] })
+        };
+      }
+      if (String(url).endsWith('/messages/draft-message-id/modify')) {
+        return { ok: true, json: async () => ({ id: 'draft-message-id', labelIds: ['DRAFT', 'Label_2'] }) };
       }
       throw new Error(`Unexpected URL: ${url}`);
     }
@@ -266,4 +305,6 @@ test('pollGmailMailbox creates a draft for a new inbox message', async () => {
   assert.equal(savedStates.at(-1).historyId, '101');
   assert(savedStates.at(-1).processedMessageIds.includes('message-id'));
   assert(calls.some((call) => call.url.endsWith('/drafts')));
+  assert(calls.some((call) => call.url.endsWith('/labels')));
+  assert(calls.some((call) => call.url.endsWith('/messages/draft-message-id/modify')));
 });
