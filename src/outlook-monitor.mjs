@@ -22,7 +22,8 @@ export function getOutlookMonitorConfig(env = process.env) {
       tenantId: env.MICROSOFT_TENANT_ID,
       clientId: env.MICROSOFT_CLIENT_ID,
       clientSecret: env.MICROSOFT_CLIENT_SECRET,
-      mailbox: env.OUTLOOK_MAILBOX || 'sales@suehirotrd.com'
+      refreshToken: env.MICROSOFT_REFRESH_TOKEN,
+      mailbox: env.MICROSOFT_REFRESH_TOKEN ? 'me' : (env.OUTLOOK_MAILBOX || 'sales@suehirotrd.com')
     }
   };
 }
@@ -30,9 +31,9 @@ export function getOutlookMonitorConfig(env = process.env) {
 export function validateOutlookMonitorConfig(config) {
   const missing = [];
   if (!config.openaiApiKey) missing.push('OPENAI_API_KEY');
-  if (!config.graph.tenantId) missing.push('MICROSOFT_TENANT_ID');
   if (!config.graph.clientId) missing.push('MICROSOFT_CLIENT_ID');
   if (!config.graph.clientSecret) missing.push('MICROSOFT_CLIENT_SECRET');
+  if (!config.graph.refreshToken && !config.graph.tenantId) missing.push('MICROSOFT_TENANT_ID');
   if (!config.mailbox) missing.push('OUTLOOK_MAILBOX');
   return missing;
 }

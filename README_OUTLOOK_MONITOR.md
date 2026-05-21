@@ -49,6 +49,32 @@ Then grant admin consent.
 
 The worker uses the OAuth 2.0 client credentials flow, so it is suitable for Railway and does not require a local PC to stay online.
 
+## Non-admin fallback
+
+If Microsoft 365 admin access is not available, try delegated OAuth instead.
+
+This still requires an app registration, but it does not use Application permissions. The mailbox user signs in once and Railway uses a refresh token after that.
+
+Delegated variables:
+
+```env
+MICROSOFT_CLIENT_ID=your_microsoft_app_client_id
+MICROSOFT_CLIENT_SECRET=your_microsoft_app_client_secret
+MICROSOFT_REFRESH_TOKEN=your_delegated_refresh_token
+```
+
+For delegated mode, the worker uses `/me` in Microsoft Graph. The signed-in account must be `sales@suehirotrd.com`.
+
+To get the refresh token:
+
+```bash
+npm run outlook:auth
+```
+
+Open `http://localhost:3001/`, sign in as `sales@suehirotrd.com`, and copy the printed `MICROSOFT_REFRESH_TOKEN` to Railway.
+
+If the organization blocks user consent, delegated mode will also fail. In that case, a Microsoft 365 admin is required.
+
 ## Behavior
 
 1. Get a Microsoft Graph app-only access token.

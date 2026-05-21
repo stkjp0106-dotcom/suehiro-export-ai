@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildInboxDeltaUrl,
+  buildDelegatedAuthUrl,
   createReplyDraft,
+  exchangeDelegatedCodeForTokens,
   fetchMessageDelta,
   getGraphAccessToken,
   sendDraft,
@@ -39,10 +41,66 @@ test('buildInboxDeltaUrl targets the mailbox inbox delta endpoint', () => {
   assert.match(url, /changeType=created/);
 });
 
+test('buildDelegatedAuthUrl creates a Microsoft consent URL', () => {
+  const url = new URL(buildDelegatedAuthUrl(
+    { tenantId: 'common', clientId: 'client-id' },
+    'http://localhost:3001/callback',
+    'state-123'
+  ));
+
+  assert.equal(url.hostname, 'login.microsoftonline.com');
+  assert.equal(url.searchParams.get('client_id'), 'client-id');
+  assert.equal(url.searchParams.get('redirect_uri'), 'http://localhost:3001/callback');
+  assert.match(url.searchParams.get('scope'), /offline_access/);
+  assert.match(url.searchParams.get('scope'), /Mail\.ReadWrite/);
+});
+
+test('exchangeDelegatedCodeForTokens posts authorization code grant', async () => {
+  const calls = [];
+  const tokens = await exchangeDelegatedCodeForTokens(
+    { tenantId: 'common', clientId: 'client-id', clientSecret: 'client-secret' },
+    'auth-code',
+    'http://localhost:3001/callback',
+    async (url, options) => {
+      calls.push({ url, options });
+      return {
+        ok: true,
+        json: async () => ({ access_token: 'access', refresh_token: 'refresh' })
+      };
+    }
+  );
+
+  assert.equal(tokens.refresh_token, 'refresh');
+  assert.match(calls[0].url, /login\.microsoftonline\.com\/common/);
+  assert.match(calls[0].options.body.toString(), /grant_type=authorization_code/);
+});
+
+test('getGraphAccessToken uses refresh token when provided', async () => {
+  const calls = [];
+  const token = await getGraphAccessToken(
+    {
+      tenantId: 'common',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      refreshToken: 'refresh-token'
+    },
+    async (url, options) => {
+      calls.push({ url, options });
+      return {
+        ok: true,
+        json: async () => ({ access_token: 'delegated-access' })
+      };
+    }
+  );
+
+  assert.equal(token, 'delegated-access');
+  assert.match(calls[0].options.body.toString(), /grant_type=refresh_token/);
+});
+
 test('fetchMessageDelta follows nextLink and returns deltaLink', async () => {
   const calls = [];
   const result = await fetchMessageDelta(
-    'sales@suehirotrd.com',
+    'me',
     'graph-token',
     {},
     {
@@ -69,6 +127,7 @@ test('fetchMessageDelta follows nextLink and returns deltaLink', async () => {
     }
   );
 
+  assert.match(calls[0], /\/me\/mailFolders\/inbox\/messages\/delta/);
   assert.equal(result.messages.length, 1);
   assert.equal(result.messages[0].id, 'message-1');
   assert.equal(result.deltaLink, 'https://graph.microsoft.com/v1.0/delta-token');

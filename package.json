@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
+    "outlook:auth": "node outlook-auth-helper.mjs",
     "outlook:worker": "node outlook-worker.mjs",
     "test": "node --test test/line.test.mjs test/openai.test.mjs test/knowledge.test.mjs test/google-drive.test.mjs test/outlook.test.mjs"
   }
