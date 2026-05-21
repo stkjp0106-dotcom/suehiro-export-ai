@@ -127,7 +127,7 @@ export async function graphRequest(pathOrUrl, accessToken, options = {}) {
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(`Microsoft Graph request failed: ${response.status} ${detail}`);
+    throw new Error(formatGraphError(response.status, detail));
   }
 
   if (response.status === 204) {
@@ -135,6 +135,20 @@ export async function graphRequest(pathOrUrl, accessToken, options = {}) {
   }
 
   return response.json();
+}
+
+function formatGraphError(status, detail) {
+  const suffix = detail ? ` ${detail}` : '';
+  if (status === 401) {
+    return [
+      `Microsoft Graph request failed: ${status}${suffix}`,
+      'Check that OUTLOOK_MAILBOX is an Exchange Online mailbox in this tenant,',
+      'that the app has admin consent for Mail.ReadWrite application permission,',
+      'and that the mailbox has an Exchange Online-capable license.'
+    ].join(' ');
+  }
+
+  return `Microsoft Graph request failed: ${status}${suffix}`;
 }
 
 export function buildInboxDeltaUrl(mailbox) {

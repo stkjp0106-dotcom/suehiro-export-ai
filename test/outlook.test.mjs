@@ -7,6 +7,7 @@ import {
   exchangeDelegatedCodeForTokens,
   fetchMessageDelta,
   getGraphAccessToken,
+  graphRequest,
   sendDraft,
   updateDraftBody
 } from '../src/graph.mjs';
@@ -131,6 +132,19 @@ test('fetchMessageDelta follows nextLink and returns deltaLink', async () => {
   assert.equal(result.messages.length, 1);
   assert.equal(result.messages[0].id, 'message-1');
   assert.equal(result.deltaLink, 'https://graph.microsoft.com/v1.0/delta-token');
+});
+
+test('graphRequest explains mailbox-oriented 401 failures', async () => {
+  await assert.rejects(
+    () => graphRequest('/users/sales@suehirotrd.com/messages', 'graph-token', {
+      fetchImpl: async () => ({
+        ok: false,
+        status: 401,
+        text: async () => ''
+      })
+    }),
+    /Exchange Online mailbox/
+  );
 });
 
 test('createReplyDraft and updateDraftBody call draft endpoints', async () => {
@@ -302,4 +316,41 @@ test('pollOutlookMailbox baselines existing mail on first run by default', async
   assert.equal(result.baselineOnly, true);
   assert.equal(savedStates.at(-1).initialized, true);
   assert.equal(savedStates.at(-1).deltaLink, 'delta-link');
+});
+
+test('pollOutlookMailbox uses /me endpoints when delegated auth is configured', async () => {
+  const calls = [];
+  const config = getOutlookMonitorConfig({
+    OUTLOOK_MAILBOX: 'sales@suehirotrd.com',
+    OUTLOOK_STATE_PATH: 'unused-state.json',
+    OPENAI_API_KEY: 'openai-key',
+    MICROSOFT_CLIENT_ID: 'client-id',
+    MICROSOFT_CLIENT_SECRET: 'client-secret',
+    MICROSOFT_REFRESH_TOKEN: 'refresh-token'
+  });
+  const logger = { info() {}, error() {} };
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+
+    if (String(url).includes('login.microsoftonline.com')) {
+      return { ok: true, json: async () => ({ access_token: 'delegated-token' }) };
+    }
+
+    return {
+      ok: true,
+      json: async () => ({
+        value: [],
+        '@odata.deltaLink': 'delta-link'
+      })
+    };
+  };
+
+  await pollOutlookMailbox(config, {
+    logger,
+    fetchImpl,
+    loadState: () => ({ initialized: false, deltaLink: '', processedMessageIds: [] }),
+    saveState: () => {}
+  });
+
+  assert(calls.some((call) => String(call.url).includes('/me/mailFolders/inbox/messages/delta')));
 });

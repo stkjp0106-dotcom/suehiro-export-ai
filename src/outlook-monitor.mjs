@@ -71,8 +71,9 @@ export async function pollOutlookMailbox(config, options = {}) {
   const saveState = options.saveState || saveMonitorState;
   const state = loadState(config.statePath);
   const accessToken = await getGraphAccessToken(config.graph, options.fetchImpl);
+  const graphMailbox = config.graph.mailbox || config.mailbox;
   const { messages, deltaLink } = await fetchMessageDelta(
-    config.mailbox,
+    graphMailbox,
     accessToken,
     state,
     { fetchImpl: options.fetchImpl }
@@ -91,7 +92,7 @@ export async function pollOutlookMailbox(config, options = {}) {
       continue;
     }
 
-    await processIncomingMessage(message, config, accessToken, options);
+    await processIncomingMessage(message, { ...config, graphMailbox }, accessToken, options);
     state.processedMessageIds.push(message.id);
     trimProcessedIds(state);
     saveState(config.statePath, { ...state, deltaLink });
@@ -109,8 +110,9 @@ export async function processIncomingMessage(message, config, accessToken, optio
     apiKey: config.openaiApiKey,
     model: config.openaiModel
   }, options.fetchImpl);
-  const draft = await createReplyDraft(config.mailbox, message.id, accessToken, options.fetchImpl);
-  await updateDraftBody(config.mailbox, draft.id, buildDraftHtml(replyText), accessToken, options.fetchImpl);
+  const graphMailbox = config.graphMailbox || config.mailbox;
+  const draft = await createReplyDraft(graphMailbox, message.id, accessToken, options.fetchImpl);
+  await updateDraftBody(graphMailbox, draft.id, buildDraftHtml(replyText), accessToken, options.fetchImpl);
 
   logger.info(`Outlook draft saved: originalMessageId=${message.id} draftMessageId=${draft.id}`);
   return { draftId: draft.id };
