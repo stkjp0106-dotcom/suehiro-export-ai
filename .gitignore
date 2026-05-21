@@ -1,0 +1,5 @@
+.env
+.tokens/
+.state/
+*.log
+.tools/
