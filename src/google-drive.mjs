@@ -12,7 +12,8 @@ export function getGoogleConfig(env = process.env) {
     clientId: env.GOOGLE_CLIENT_ID,
     clientSecret: env.GOOGLE_CLIENT_SECRET,
     redirectUri: env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/google/oauth2callback',
-    tokenPath: env.GOOGLE_TOKEN_PATH || DEFAULT_TOKEN_PATH
+    tokenPath: env.GOOGLE_TOKEN_PATH || DEFAULT_TOKEN_PATH,
+    refreshToken: env.GOOGLE_REFRESH_TOKEN
   };
 }
 
@@ -20,12 +21,12 @@ export function hasGoogleConfig(config) {
   return Boolean(config.clientId && config.clientSecret && config.redirectUri);
 }
 
-export function buildGoogleAuthUrl(config) {
+export function buildGoogleAuthUrl(config, scope = DRIVE_READONLY_SCOPE) {
   const url = new URL(GOOGLE_AUTH_URL);
   url.searchParams.set('client_id', config.clientId);
   url.searchParams.set('redirect_uri', config.redirectUri);
   url.searchParams.set('response_type', 'code');
-  url.searchParams.set('scope', DRIVE_READONLY_SCOPE);
+  url.searchParams.set('scope', scope);
   url.searchParams.set('access_type', 'offline');
   url.searchParams.set('prompt', 'consent');
   return url.toString();
@@ -90,6 +91,11 @@ export function loadGoogleTokens(tokenPath = DEFAULT_TOKEN_PATH) {
 }
 
 export async function getValidAccessToken(config, fetchImpl = fetch) {
+  if (config.refreshToken) {
+    const refreshed = await refreshAccessToken(config.refreshToken, config, fetchImpl);
+    return refreshed.access_token;
+  }
+
   const tokens = loadGoogleTokens(config.tokenPath);
   if (!tokens) {
     return null;
