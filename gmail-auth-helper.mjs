@@ -2,12 +2,13 @@ import { createServer } from 'node:http';
 import { getGoogleConfig, buildGoogleAuthUrl, exchangeCodeForTokens } from './src/google-drive.mjs';
 import { GMAIL_SCOPES } from './src/gmail.mjs';
 
-const AUTH_PORT = Number(process.env.AUTH_PORT || 3002);
+const DEFAULT_AUTH_PORT = Number(process.env.AUTH_PORT || 3002);
 
 const config = {
   ...getGoogleConfig(process.env),
-  redirectUri: process.env.GOOGLE_REDIRECT_URI || `http://localhost:${AUTH_PORT}/google/oauth2callback`
+  redirectUri: process.env.GOOGLE_REDIRECT_URI || `http://localhost:${DEFAULT_AUTH_PORT}/google/oauth2callback`
 };
+const AUTH_PORT = Number(new URL(config.redirectUri).port || DEFAULT_AUTH_PORT);
 
 if (!config.clientId || !config.clientSecret) {
   console.error('Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET first.');
