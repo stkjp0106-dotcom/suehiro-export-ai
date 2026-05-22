@@ -11,10 +11,8 @@ import {
   createGmailReplyDraft,
   findGmailLabelId,
   getGmailAccessToken,
-  getGmailDraftSignatureHtml,
   listGmailHistory,
-  normalizeGmailMessage,
-  selectGmailSignatureHtml
+  normalizeGmailMessage
 } from '../src/gmail.mjs';
 import {
   buildGmailLineReport,
@@ -87,45 +85,6 @@ test('findGmailLabelId locates the AI Reply label', async () => {
   });
 
   assert.equal(labelId, 'Label_2');
-});
-
-test('selectGmailSignatureHtml prefers primary signature', () => {
-  const signature = selectGmailSignatureHtml([
-    { sendAsEmail: 'alias@example.com', isDefault: true, signature: '<p>Alias signature</p>' },
-    { sendAsEmail: 'sales@suehirotrd.com', isPrimary: true, signature: '<p>Suetore signature</p>' }
-  ]);
-
-  assert.equal(signature, '<p>Suetore signature</p>');
-});
-
-test('getGmailDraftSignatureHtml loads sendAs signature with fallback', async () => {
-  const warnings = [];
-  const signature = await getGmailDraftSignatureHtml('gmail-token', {
-    logger: { info() {}, warn: (message) => warnings.push(message) },
-    fetchImpl: async (url) => {
-      assert.match(String(url), /\/gmail\/v1\/users\/me\/settings\/sendAs$/);
-      return {
-        ok: true,
-        json: async () => ({
-          sendAs: [{ sendAsEmail: 'sales@suehirotrd.com', isPrimary: true, signature: '<p>Configured signature</p>' }]
-        })
-      };
-    }
-  });
-
-  assert.equal(signature, '<p>Configured signature</p>');
-  assert.deepEqual(warnings, []);
-});
-
-test('getGmailDraftSignatureHtml falls back to SUEHIRO signature when sendAs fails', async () => {
-  const warnings = [];
-  const signature = await getGmailDraftSignatureHtml('gmail-token', {
-    logger: { info() {}, warn: (message) => warnings.push(message) },
-    fetchImpl: async () => ({ ok: false, text: async () => 'forbidden' })
-  });
-
-  assert.match(signature, /SUEHIRO TRADING Co\., Ltd\./);
-  assert.match(warnings[0], /fallback SUEHIRO signature/);
 });
 
 test('addGmailLabels calls Gmail modify endpoint', async () => {
@@ -351,17 +310,12 @@ test('buildGmailReplyDraftInput and buildGmailDraftHtml format content', () => {
   assert.match(input, /Buyer/);
   assert.match(html, /AI返信案/);
   assert.match(html, /<br>/);
-  assert.match(html, /stststststststststststststststststststststst/);
+  assert.match(html, /ststststststststststststststststststststststststststststst/);
+  assert.match(html, /Takumi Sato -佐藤 拓海-/);
   assert.match(html, /SUEHIRO TRADING Co\., Ltd\./);
+  assert.match(html, /Mob\/Whatsapp : \+81\(0\)9061407648/);
   assert.match(html, /https:\/\/suehirotrd\.com\/sales\//);
-  assert.match(html, /Tokyo, Japan\. 111-0032/);
-});
-
-test('buildGmailDraftHtml uses configured Gmail signature when provided', () => {
-  const html = buildGmailDraftHtml('Hello', '<p>Configured Suetore signature</p>');
-
-  assert.match(html, /Configured Suetore signature/);
-  assert.doesNotMatch(html, /stststststststststststststststststststststst/);
+  assert.match(html, /1-13-5-C63 Asakusa, Taito-ku, Tokyo, Japan\. 111-0032/);
 });
 
 test('pollGmailMailbox saves first-run baseline from profile', async () => {
@@ -462,14 +416,6 @@ test('pollGmailMailbox creates a draft for a new inbox message', async () => {
           };
         }
         return { ok: true, json: async () => ({ output_text: 'Draft reply' }) };
-      }
-      if (String(url).endsWith('/settings/sendAs')) {
-        return {
-          ok: true,
-          json: async () => ({
-            sendAs: [{ sendAsEmail: 'sales@suehirotrd.com', isPrimary: true, signature: '<p>Configured Suetore signature</p>' }]
-          })
-        };
       }
       if (String(url).endsWith('/drafts')) {
         return { ok: true, json: async () => ({ id: 'draft-id', message: { id: 'draft-message-id' } }) };
@@ -641,14 +587,6 @@ test('pollGmailMailbox creates AI Reply label when missing', async () => {
           };
         }
         return { ok: true, json: async () => ({ output_text: 'Draft reply' }) };
-      }
-      if (String(url).endsWith('/settings/sendAs')) {
-        return {
-          ok: true,
-          json: async () => ({
-            sendAs: [{ sendAsEmail: 'sales@suehirotrd.com', isPrimary: true, signature: '<p>Configured Suetore signature</p>' }]
-          })
-        };
       }
       if (String(url).endsWith('/drafts')) {
         return { ok: true, json: async () => ({ id: 'draft-id', message: { id: 'draft-message-id' } }) };

@@ -8,7 +8,6 @@ import {
   createGmailReplyDraft as createGmailApiReplyDraft,
   findGmailLabelId,
   getGmailAccessToken,
-  getGmailDraftSignatureHtml,
   getGmailMessage,
   getGmailProfile,
   listGmailHistory,
@@ -193,13 +192,9 @@ export async function processGmailMessage(message, config, accessToken, options 
     apiKey: config.openaiApiKey,
     model: config.openaiModel
   }, options.fetchImpl);
-  const signatureHtml = await getGmailDraftSignatureHtml(accessToken, {
-    logger,
-    fetchImpl: options.fetchImpl
-  });
   const draft = await createGmailApiReplyDraft(
     normalized,
-    buildGmailDraftHtml(replyText, signatureHtml),
+    buildGmailDraftHtml(replyText),
     accessToken,
     options.fetchImpl
   );
