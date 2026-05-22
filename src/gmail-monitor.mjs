@@ -163,17 +163,10 @@ export async function processGmailMessage(message, config, accessToken, options 
   );
   const draftMessageId = draft.message?.id || draft.messageId || '';
   if (config.draftLabelName && draftMessageId) {
-    let labelId = await findGmailLabelId(config.draftLabelName, accessToken, options.fetchImpl);
-    if (!labelId) {
-      labelId = await createGmailLabel(config.draftLabelName, accessToken, options.fetchImpl);
-      logger.info(`Gmail draft label created: label=${JSON.stringify(config.draftLabelName)}`);
-    }
-    if (labelId) {
-      await addGmailLabels(draftMessageId, [labelId], accessToken, options.fetchImpl);
-      logger.info(`Gmail draft labeled: draftMessageId=${draftMessageId} label=${JSON.stringify(config.draftLabelName)}`);
-    } else {
-      logger.warn(`Gmail draft label not found: ${JSON.stringify(config.draftLabelName)}`);
-    }
+    await labelGmailDraft(draftMessageId, config.draftLabelName, accessToken, {
+      logger,
+      fetchImpl: options.fetchImpl
+    });
   }
 
   logger.info(`Gmail draft saved: originalMessageId=${normalized.id} draftId=${draft.id}`);
@@ -183,6 +176,27 @@ export async function processGmailMessage(message, config, accessToken, options 
     logger.error(`LINE mail report failed: ${error.stack || error.message}`);
   }
   return { draftId: draft.id };
+}
+
+export async function labelGmailDraft(draftMessageId, labelName, accessToken, options = {}) {
+  const logger = options.logger || console;
+  try {
+    let labelId = await findGmailLabelId(labelName, accessToken, options.fetchImpl);
+    if (!labelId) {
+      labelId = await createGmailLabel(labelName, accessToken, options.fetchImpl);
+      logger.info(`Gmail draft label created: label=${JSON.stringify(labelName)}`);
+    }
+    if (labelId) {
+      await addGmailLabels(draftMessageId, [labelId], accessToken, options.fetchImpl);
+      logger.info(`Gmail draft labeled: draftMessageId=${draftMessageId} label=${JSON.stringify(labelName)}`);
+      return true;
+    }
+    logger.warn(`Gmail draft label not found: ${JSON.stringify(labelName)}`);
+    return false;
+  } catch (error) {
+    logger.warn(`Gmail draft label skipped: label=${JSON.stringify(labelName)} error=${error.message}`);
+    return false;
+  }
 }
 
 export async function notifyLineAboutGmailDraft(message, draft, config, options = {}) {

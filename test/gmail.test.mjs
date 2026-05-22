@@ -17,6 +17,7 @@ import {
   createGmailAiReplyDraft,
   createGmailAiMailSummary,
   getGmailMonitorConfig,
+  labelGmailDraft,
   notifyLineAboutGmailDraft,
   pollGmailMailbox
 } from '../src/gmail-monitor.mjs';
@@ -428,6 +429,28 @@ test('pollGmailMailbox creates AI Reply label when missing', async () => {
   assert.equal(result.processed, 1);
   assert(calls.some((call) => call.url.endsWith('/labels') && call.options.method === 'POST'));
   assert(calls.some((call) => call.url.endsWith('/messages/draft-message-id/modify')));
+});
+
+test('labelGmailDraft skips label errors without failing the message', async () => {
+  const warnings = [];
+  const result = await labelGmailDraft('draft-message-id', 'AI Reply', 'gmail-token', {
+    logger: {
+      info() {},
+      warn: (message) => warnings.push(message)
+    },
+    fetchImpl: async (url, options = {}) => {
+      if (String(url).endsWith('/labels') && options.method === 'POST') {
+        return { ok: false, text: async () => 'insufficient scope' };
+      }
+      if (String(url).endsWith('/labels')) {
+        return { ok: true, json: async () => ({ labels: [] }) };
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    }
+  });
+
+  assert.equal(result, false);
+  assert.match(warnings[0], /Gmail draft label skipped/);
 });
 
 test('buildGmailLineReport formats the new mail summary for LINE', () => {
