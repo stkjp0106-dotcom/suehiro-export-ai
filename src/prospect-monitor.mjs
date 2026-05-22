@@ -3,7 +3,8 @@ import { dirname, join } from 'node:path';
 import {
   buildGmailDraftHtml,
   createGmailOutboundDraft,
-  getGmailAccessToken
+  getGmailAccessToken,
+  getGmailDraftSignatureHtml
 } from './gmail.mjs';
 import { pushLineText } from './line.mjs';
 
@@ -147,6 +148,10 @@ export async function runProspectSearch(config, options = {}) {
   const logger = options.logger || console;
   const state = (options.loadState || loadProspectState)(config.statePath);
   const accessToken = await getGmailAccessToken(config.google, options.fetchImpl);
+  const signatureHtml = await getGmailDraftSignatureHtml(accessToken, {
+    logger,
+    fetchImpl: options.fetchImpl
+  });
   const prospects = await discoverProspects(config, state, options.fetchImpl);
   const selected = prospects.slice(0, config.maxProspects);
   const drafts = [];
@@ -155,7 +160,7 @@ export async function runProspectSearch(config, options = {}) {
     const draft = await createGmailOutboundDraft({
       to: prospect.email,
       subject: prospect.draftSubject,
-      htmlBody: buildGmailDraftHtml(prospect.draftBody)
+      htmlBody: buildGmailDraftHtml(prospect.draftBody, signatureHtml)
     }, accessToken, options.fetchImpl);
     drafts.push({ prospect, draftId: draft.id });
     state.seenProspects.push(prospect.website || prospect.email || prospect.company);

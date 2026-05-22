@@ -55,6 +55,37 @@ export async function getGmailProfile(accessToken, fetchImpl = fetch) {
   return gmailRequest('/profile', accessToken, { fetchImpl });
 }
 
+export async function listGmailSendAs(accessToken, fetchImpl = fetch) {
+  const data = await gmailRequest('/settings/sendAs', accessToken, { fetchImpl });
+  return Array.isArray(data.sendAs) ? data.sendAs : [];
+}
+
+export function selectGmailSignatureHtml(sendAsAliases = []) {
+  const aliasesWithSignature = sendAsAliases.filter((alias) => String(alias.signature || '').trim());
+  return (
+    aliasesWithSignature.find((alias) => alias.isPrimary)?.signature ||
+    aliasesWithSignature.find((alias) => alias.isDefault)?.signature ||
+    aliasesWithSignature[0]?.signature ||
+    ''
+  );
+}
+
+export async function getGmailDraftSignatureHtml(accessToken, options = {}) {
+  const logger = options.logger || console;
+  try {
+    const aliases = await listGmailSendAs(accessToken, options.fetchImpl);
+    const signatureHtml = selectGmailSignatureHtml(aliases);
+    if (signatureHtml) {
+      logger.info('Gmail configured signature loaded from sendAs settings');
+      return signatureHtml;
+    }
+    logger.warn('Gmail configured signature not found; using fallback SUEHIRO signature');
+  } catch (error) {
+    logger.warn(`Gmail configured signature unavailable; using fallback SUEHIRO signature: ${error.message}`);
+  }
+  return buildSuehiroEmailSignatureHtml();
+}
+
 export async function listGmailHistory(startHistoryId, accessToken, options = {}) {
   const messages = [];
   let nextPageToken = '';
@@ -187,13 +218,13 @@ export function buildGmailReplyDraftInput(message) {
   ].join('\n');
 }
 
-export function buildGmailDraftHtml(replyText) {
+export function buildGmailDraftHtml(replyText, signatureHtml = '') {
   return [
     '<p><strong>AI返信案です。送信前に必ず内容を確認してください。</strong></p>',
     '<hr>',
     textToHtml(replyText),
     '<br>',
-    buildSuehiroEmailSignatureHtml()
+    signatureHtml || buildSuehiroEmailSignatureHtml()
   ].join('\n');
 }
 

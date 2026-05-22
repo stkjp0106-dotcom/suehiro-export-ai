@@ -161,6 +161,14 @@ test('runProspectSearch creates drafts and reports to LINE', async () => {
           })
         };
       }
+      if (String(url).endsWith('/settings/sendAs')) {
+        return {
+          ok: true,
+          json: async () => ({
+            sendAs: [{ sendAsEmail: 'sales@suehirotrd.com', isPrimary: true, signature: '<p>Configured Suetore signature</p>' }]
+          })
+        };
+      }
       if (String(url).endsWith('/drafts')) {
         return { ok: true, json: async () => ({ id: 'draft-id' }) };
       }
