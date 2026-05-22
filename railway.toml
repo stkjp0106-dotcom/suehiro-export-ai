@@ -1,4 +1,4 @@
 [deploy]
-startCommand = "npm start"
+startCommand = "npm run gmail:worker"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
