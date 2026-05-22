@@ -12,8 +12,11 @@ import {
   normalizeGmailMessage
 } from '../src/gmail.mjs';
 import {
+  buildGmailLineReport,
   createGmailAiReplyDraft,
+  createGmailAiMailSummary,
   getGmailMonitorConfig,
+  notifyLineAboutGmailDraft,
   pollGmailMailbox
 } from '../src/gmail-monitor.mjs';
 
@@ -183,6 +186,27 @@ test('createGmailAiReplyDraft asks OpenAI for an email body only', async () => {
   assert.equal(reply, 'Thank you. We will confirm and reply.');
 });
 
+test('createGmailAiMailSummary asks OpenAI for a short Japanese summary', async () => {
+  const summary = await createGmailAiMailSummary(
+    {
+      from: 'Buyer <buyer@example.com>',
+      subject: 'Quotation request',
+      bodyText: 'Please send price for beef tongue.'
+    },
+    { apiKey: 'openai-key', model: 'test-model' },
+    async (url, options) => {
+      assert.equal(url, 'https://api.openai.com/v1/responses');
+      const body = JSON.parse(options.body);
+      assert.equal(body.model, 'test-model');
+      assert.match(body.input, /Quotation request/);
+      assert.match(body.instructions, /Japanese/);
+      return { ok: true, json: async () => ({ output_text: '牛タンの見積依頼。価格確認が必要。' }) };
+    }
+  );
+
+  assert.equal(summary, '牛タンの見積依頼。価格確認が必要。');
+});
+
 test('buildGmailReplyDraftInput and buildGmailDraftHtml format content', () => {
   const input = buildGmailReplyDraftInput({
     from: 'Buyer <buyer@example.com>',
@@ -240,7 +264,9 @@ test('pollGmailMailbox creates a draft for a new inbox message', async () => {
     OPENAI_MODEL: 'test-model',
     GOOGLE_CLIENT_ID: 'client-id',
     GOOGLE_CLIENT_SECRET: 'client-secret',
-    GOOGLE_REFRESH_TOKEN: 'refresh-token'
+    GOOGLE_REFRESH_TOKEN: 'refresh-token',
+    LINE_CHANNEL_ACCESS_TOKEN: 'line-token',
+    LINE_REPORT_TO_ID: 'line-user-id'
   });
   const logger = { info() {}, error() {} };
 
@@ -297,6 +323,9 @@ test('pollGmailMailbox creates a draft for a new inbox message', async () => {
       if (String(url).endsWith('/messages/draft-message-id/modify')) {
         return { ok: true, json: async () => ({ id: 'draft-message-id', labelIds: ['DRAFT', 'Label_2'] }) };
       }
+      if (String(url).includes('api.line.me')) {
+        return { ok: true };
+      }
       throw new Error(`Unexpected URL: ${url}`);
     }
   });
@@ -307,4 +336,41 @@ test('pollGmailMailbox creates a draft for a new inbox message', async () => {
   assert(calls.some((call) => call.url.endsWith('/drafts')));
   assert(calls.some((call) => call.url.endsWith('/labels')));
   assert(calls.some((call) => call.url.endsWith('/messages/draft-message-id/modify')));
+  assert(calls.some((call) => call.url === 'https://api.line.me/v2/bot/message/push'));
+});
+
+test('buildGmailLineReport formats the new mail summary for LINE', () => {
+  const report = buildGmailLineReport(
+    {
+      from: 'Buyer <buyer@example.com>',
+      subject: 'Need quote',
+      bodyText: 'Please quote beef tongue.\nWe need 20 cartons.'
+    },
+    { id: 'draft-id' },
+    '牛タン20カートンの見積依頼。'
+  );
+
+  assert.match(report, /新着メール/);
+  assert.match(report, /Buyer <buyer@example\.com>/);
+  assert.match(report, /Need quote/);
+  assert.match(report, /牛タン20カートンの見積依頼。/);
+  assert.match(report, /draft-id/);
+});
+
+test('notifyLineAboutGmailDraft skips when LINE report env is missing', async () => {
+  const warnings = [];
+  const result = await notifyLineAboutGmailDraft(
+    { id: 'message-id', subject: 'Hello' },
+    { id: 'draft-id' },
+    { lineReport: {} },
+    {
+      logger: { info() {}, warn: (message) => warnings.push(message) },
+      fetchImpl: async () => {
+        throw new Error('LINE should not be called');
+      }
+    }
+  );
+
+  assert.equal(result, false);
+  assert.match(warnings[0], /LINE mail report skipped/);
 });

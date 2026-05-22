@@ -5,6 +5,7 @@ import {
   buildReceivedReply,
   handleLineWebhook,
   parseLineMessageText,
+  pushLineText,
   verifyLineSignature
 } from '../src/line.mjs';
 
@@ -143,4 +144,20 @@ test('parseLineMessageText returns text from LINE text message events', () => {
     }),
     text
   );
+});
+
+test('pushLineText calls LINE push endpoint', async () => {
+  const calls = [];
+
+  await pushLineText('user-id', 'access-token', 'mail report', async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true };
+  });
+
+  assert.equal(calls[0].url, 'https://api.line.me/v2/bot/message/push');
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer access-token');
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    to: 'user-id',
+    messages: [{ type: 'text', text: 'mail report' }]
+  });
 });

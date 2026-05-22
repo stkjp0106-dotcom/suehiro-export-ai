@@ -31,6 +31,8 @@ OPENAI_MODEL=gpt-5.4-mini
 GOOGLE_CLIENT_ID=your_google_oauth_client_id
 GOOGLE_CLIENT_SECRET=your_google_oauth_client_secret
 GOOGLE_REFRESH_TOKEN=your_google_refresh_token
+LINE_CHANNEL_ACCESS_TOKEN=your_line_channel_access_token
+LINE_REPORT_TO_ID=your_line_user_or_group_id
 ```
 
 For persistent Gmail history state on Railway, attach a Railway volume and set:
@@ -65,7 +67,10 @@ Open `http://localhost:3002/`, sign in as the Google account that owns `sales@su
 4. Ask OpenAI to create a reply draft.
 5. Create a Gmail draft in the same thread.
 6. Add the `AI Reply` label to the draft message.
-7. Save the Gmail history ID and processed message IDs.
+7. Push a LINE report with the sender, subject, email summary, and draft ID.
+8. Save the Gmail history ID and processed message IDs.
+
+If `LINE_REPORT_TO_ID` or `LINE_CHANNEL_ACCESS_TOKEN` is not set, the draft is still created and the worker logs that the LINE report was skipped.
 
 On the first run, the worker saves a baseline history ID and does not create drafts for existing Inbox mail unless `GMAIL_PROCESS_EXISTING_ON_FIRST_RUN=true`.
 

@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 const LINE_REPLY_API_URL = 'https://api.line.me/v2/bot/message/reply';
+const LINE_PUSH_API_URL = 'https://api.line.me/v2/bot/message/push';
 const DEFAULT_REPLY_TEXT = '\u53d7\u4fe1\u3057\u307e\u3057\u305f\u3002\u78ba\u8a8d\u3057\u3066\u8fd4\u4fe1\u3057\u307e\u3059\u3002';
 
 export function verifyLineSignature(body, signature, channelSecret) {
@@ -56,6 +57,30 @@ export async function replyToLine(replyToken, channelAccessToken, text = DEFAULT
   if (!response.ok) {
     const detail = await response.text();
     throw new Error(`LINE reply failed: ${response.status} ${detail}`);
+  }
+}
+
+export async function pushLineText(to, channelAccessToken, text, fetchImpl = fetch) {
+  const response = await fetchImpl(LINE_PUSH_API_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${channelAccessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      to,
+      messages: [
+        {
+          type: 'text',
+          text
+        }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`LINE push failed: ${response.status} ${detail}`);
   }
 }
 

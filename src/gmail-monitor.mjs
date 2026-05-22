@@ -12,6 +12,7 @@ import {
   listGmailHistory,
   normalizeGmailMessage
 } from './gmail.mjs';
+import { pushLineText } from './line.mjs';
 
 const OPENAI_RESPONSES_API_URL = 'https://api.openai.com/v1/responses';
 const DEFAULT_STATE_PATH = '.state/gmail-monitor.json';
@@ -28,6 +29,14 @@ const GMAIL_REPLY_INSTRUCTIONS = [
   'Return only the email body text, with no subject line and no markdown fences.'
 ].join('\n');
 
+const GMAIL_SUMMARY_INSTRUCTIONS = [
+  'You summarize incoming sales emails for SUEHIRO TRADING internal LINE notifications.',
+  'Write in Japanese.',
+  'Keep it short: 2 to 3 lines.',
+  'Include the sender request, products or quantities if present, and any urgent next action.',
+  'Do not invent details.'
+].join('\n');
+
 export function getGmailMonitorConfig(env = process.env) {
   return {
     mailbox: env.GMAIL_MAILBOX || env.OUTLOOK_MAILBOX || 'sales@suehirotrd.com',
@@ -37,6 +46,10 @@ export function getGmailMonitorConfig(env = process.env) {
     processExistingOnFirstRun: env.GMAIL_PROCESS_EXISTING_ON_FIRST_RUN === 'true',
     openaiApiKey: env.OPENAI_API_KEY,
     openaiModel: env.OPENAI_MODEL || 'gpt-4o-mini',
+    lineReport: {
+      to: env.LINE_REPORT_TO_ID || env.LINE_USER_ID || '',
+      channelAccessToken: env.LINE_CHANNEL_ACCESS_TOKEN || ''
+    },
     google: {
       clientId: env.GOOGLE_CLIENT_ID,
       clientSecret: env.GOOGLE_CLIENT_SECRET,
@@ -159,7 +172,77 @@ export async function processGmailMessage(message, config, accessToken, options 
   }
 
   logger.info(`Gmail draft saved: originalMessageId=${normalized.id} draftId=${draft.id}`);
+  try {
+    await notifyLineAboutGmailDraft(normalized, draft, config, { logger, fetchImpl: options.fetchImpl });
+  } catch (error) {
+    logger.error(`LINE mail report failed: ${error.stack || error.message}`);
+  }
   return { draftId: draft.id };
+}
+
+export async function notifyLineAboutGmailDraft(message, draft, config, options = {}) {
+  const logger = options.logger || console;
+  const lineReport = config.lineReport || {};
+  if (!lineReport.to || !lineReport.channelAccessToken) {
+    logger.warn('LINE mail report skipped: LINE_REPORT_TO_ID or LINE_CHANNEL_ACCESS_TOKEN is not configured');
+    return false;
+  }
+
+  let summary = '';
+  try {
+    summary = await createGmailAiMailSummary(message, {
+      apiKey: config.openaiApiKey,
+      model: config.openaiModel
+    }, options.fetchImpl);
+  } catch (error) {
+    logger.warn(`LINE mail report summary fallback: ${error.message}`);
+  }
+
+  const text = buildGmailLineReport(message, draft, summary);
+  await pushLineText(lineReport.to, lineReport.channelAccessToken, text, options.fetchImpl);
+  logger.info(`LINE mail report sent: originalMessageId=${message.id} draftId=${draft.id}`);
+  return true;
+}
+
+export function buildGmailLineReport(message, draft = {}, summary = '') {
+  const subject = message.subject || '(no subject)';
+  const from = message.from || '(unknown sender)';
+  const summaryText = compactText(summary || message.bodyText || message.snippet || '').slice(0, 500) || '(本文なし)';
+  const draftId = draft.id || '(unknown)';
+
+  return [
+    '新着メールを検知しました',
+    '',
+    `From: ${from}`,
+    `Subject: ${subject}`,
+    '',
+    `概要: ${summaryText}`,
+    '',
+    `AI返信案を下書きに保存しました。Draft ID: ${draftId}`
+  ].join('\n');
+}
+
+export async function createGmailAiMailSummary(message, config, fetchImpl = fetch) {
+  const response = await fetchImpl(OPENAI_RESPONSES_API_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: config.model,
+      instructions: GMAIL_SUMMARY_INSTRUCTIONS,
+      input: buildGmailReplyDraftInput(message)
+    })
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`OpenAI Gmail summary failed: ${response.status} ${detail}`);
+  }
+
+  const data = await response.json();
+  return extractOutputText(data);
 }
 
 export async function createGmailAiReplyDraft(message, config, fetchImpl = fetch) {
@@ -212,6 +295,10 @@ function trimProcessedIds(state, limit = 1000) {
   if (state.processedMessageIds.length > limit) {
     state.processedMessageIds = state.processedMessageIds.slice(-limit);
   }
+}
+
+function compactText(text) {
+  return String(text).replace(/\s+/g, ' ').trim();
 }
 
 function extractOutputText(data) {
