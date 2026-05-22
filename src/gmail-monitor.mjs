@@ -38,6 +38,17 @@ const GMAIL_SUMMARY_INSTRUCTIONS = [
   'Do not invent details.'
 ].join('\n');
 
+const GMAIL_INQUIRY_CLASSIFICATION_INSTRUCTIONS = [
+  'You classify incoming emails for SUEHIRO TRADING.',
+  'Decide whether the email is a new customer inquiry that needs a sales reply draft.',
+  'New inquiry examples: first contact, quotation request, product question, export/import inquiry, sample request, stock or price inquiry from a customer or prospect.',
+  'Not new inquiry examples: replies in an existing conversation, newsletters, promotions, logistics sales pitches, automated notifications, spam, internal updates, follow-ups with no new customer request.',
+  'Reply only as compact JSON with keys: is_new_inquiry, summary, reason.',
+  'is_new_inquiry must be a boolean.',
+  'summary and reason must be Japanese strings.',
+  'Do not invent details.'
+].join('\n');
+
 export function getGmailMonitorConfig(env = process.env) {
   return {
     mailbox: env.GMAIL_MAILBOX || env.OUTLOOK_MAILBOX || 'sales@suehirotrd.com',
@@ -149,6 +160,41 @@ export async function pollGmailMailbox(config, options = {}) {
 export async function processGmailMessage(message, config, accessToken, options = {}) {
   const logger = options.logger || console;
   const normalized = normalizeGmailMessage(message);
+  logger.info(`Classifying Gmail message: messageId=${normalized.id} subject=${JSON.stringify(normalized.subject || '')}`);
+
+  let classification;
+  try {
+    classification = await classifyGmailInquiry(normalized, {
+      apiKey: config.openaiApiKey,
+      model: config.openaiModel
+    }, options.fetchImpl);
+  } catch (error) {
+    logger.warn(`Gmail inquiry classification failed: messageId=${normalized.id} error=${error.message}`);
+    classification = {
+      isNewInquiry: false,
+      summary: '新規問い合わせかどうかの判定に失敗しました。',
+      reason: 'AI判定に失敗したため、安全のため下書きは作成しません。'
+    };
+  }
+
+  logger.info(
+    `Gmail inquiry classified: messageId=${normalized.id} isNewInquiry=${classification.isNewInquiry} reason=${JSON.stringify(classification.reason)}`
+  );
+
+  if (!classification.isNewInquiry) {
+    try {
+      await notifyLineAboutGmailMessage(normalized, config, {
+        classification,
+        draft: null,
+        logger,
+        fetchImpl: options.fetchImpl
+      });
+    } catch (error) {
+      logger.error(`LINE mail report failed: ${error.stack || error.message}`);
+    }
+    return { draftId: '', skipped: true, classification };
+  }
+
   logger.info(`Creating Gmail draft: messageId=${normalized.id} subject=${JSON.stringify(normalized.subject || '')}`);
 
   const replyText = await createGmailAiReplyDraft(normalized, {
@@ -171,11 +217,16 @@ export async function processGmailMessage(message, config, accessToken, options 
 
   logger.info(`Gmail draft saved: originalMessageId=${normalized.id} draftId=${draft.id}`);
   try {
-    await notifyLineAboutGmailDraft(normalized, draft, config, { logger, fetchImpl: options.fetchImpl });
+    await notifyLineAboutGmailMessage(normalized, config, {
+      classification,
+      draft,
+      logger,
+      fetchImpl: options.fetchImpl
+    });
   } catch (error) {
     logger.error(`LINE mail report failed: ${error.stack || error.message}`);
   }
-  return { draftId: draft.id };
+  return { draftId: draft.id, skipped: false, classification };
 }
 
 export async function labelGmailDraft(draftMessageId, labelName, accessToken, options = {}) {
@@ -223,22 +274,65 @@ export async function notifyLineAboutGmailDraft(message, draft, config, options 
   return true;
 }
 
-export function buildGmailLineReport(message, draft = {}, summary = '') {
+export async function notifyLineAboutGmailMessage(message, config, options = {}) {
+  const logger = options.logger || console;
+  const lineReport = config.lineReport || {};
+  if (!lineReport.to || !lineReport.channelAccessToken) {
+    logger.warn('LINE mail report skipped: LINE_REPORT_TO_ID or LINE_CHANNEL_ACCESS_TOKEN is not configured');
+    return false;
+  }
+
+  const text = buildGmailLineReport(message, options.draft, options.classification?.summary || '', options.classification);
+  await pushLineText(lineReport.to, lineReport.channelAccessToken, text, options.fetchImpl);
+  logger.info(`LINE mail report sent: originalMessageId=${message.id} draftId=${options.draft?.id || ''}`);
+  return true;
+}
+
+export function buildGmailLineReport(message, draft = {}, summary = '', classification = null) {
   const subject = message.subject || '(no subject)';
   const from = message.from || '(unknown sender)';
   const summaryText = compactText(summary || message.bodyText || message.snippet || '').slice(0, 500) || '(本文なし)';
-  const draftId = draft.id || '(unknown)';
+  const isNewInquiry = classification?.isNewInquiry === true;
+  const reason = compactText(classification?.reason || '').slice(0, 300);
+  const draftId = draft?.id || '';
 
   return [
-    '新着メールを検知しました',
+    'メールを検知しました',
+    `判定: ${isNewInquiry ? '新規問い合わせ' : '新規問い合わせではない'}`,
     '',
     `From: ${from}`,
     `Subject: ${subject}`,
     '',
     `概要: ${summaryText}`,
+    ...(reason ? [`理由: ${reason}`] : []),
     '',
-    `AI返信案を下書きに保存しました。Draft ID: ${draftId}`
+    draftId
+      ? `AI返信案を下書きに保存しました。Draft ID: ${draftId}`
+      : 'AI返信案の下書きは作成していません。'
   ].join('\n');
+}
+
+export async function classifyGmailInquiry(message, config, fetchImpl = fetch) {
+  const response = await fetchImpl(OPENAI_RESPONSES_API_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: config.model,
+      instructions: GMAIL_INQUIRY_CLASSIFICATION_INSTRUCTIONS,
+      input: buildGmailReplyDraftInput(message)
+    })
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`OpenAI Gmail inquiry classification failed: ${response.status} ${detail}`);
+  }
+
+  const data = await response.json();
+  return parseInquiryClassification(extractOutputText(data));
 }
 
 export async function createGmailAiMailSummary(message, config, fetchImpl = fetch) {
@@ -318,6 +412,31 @@ function trimProcessedIds(state, limit = 1000) {
 
 function compactText(text) {
   return String(text).replace(/\s+/g, ' ').trim();
+}
+
+function parseInquiryClassification(text) {
+  try {
+    const parsed = JSON.parse(stripJsonCodeFence(text));
+    return {
+      isNewInquiry: parsed.is_new_inquiry === true,
+      summary: compactText(parsed.summary || ''),
+      reason: compactText(parsed.reason || '')
+    };
+  } catch {
+    return {
+      isNewInquiry: false,
+      summary: '新規問い合わせかどうかの判定に失敗しました。',
+      reason: 'AI判定結果をJSONとして読み取れませんでした。安全のため下書きは作成しません。'
+    };
+  }
+}
+
+function stripJsonCodeFence(text) {
+  return String(text || '')
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
 }
 
 function extractOutputText(data) {

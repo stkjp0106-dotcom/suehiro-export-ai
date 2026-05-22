@@ -14,6 +14,7 @@ import {
 } from '../src/gmail.mjs';
 import {
   buildGmailLineReport,
+  classifyGmailInquiry,
   createGmailAiReplyDraft,
   createGmailAiMailSummary,
   getGmailMonitorConfig,
@@ -224,6 +225,48 @@ test('createGmailAiMailSummary asks OpenAI for a short Japanese summary', async 
   assert.equal(summary, '牛タンの見積依頼。価格確認が必要。');
 });
 
+test('classifyGmailInquiry parses new inquiry JSON', async () => {
+  const classification = await classifyGmailInquiry(
+    {
+      from: 'Buyer <buyer@example.com>',
+      subject: 'Quotation request',
+      bodyText: 'Please send price for beef tongue.'
+    },
+    { apiKey: 'openai-key', model: 'test-model' },
+    async (url, options) => {
+      assert.equal(url, 'https://api.openai.com/v1/responses');
+      const body = JSON.parse(options.body);
+      assert.equal(body.model, 'test-model');
+      assert.match(body.instructions, /classify incoming emails/);
+      return {
+        ok: true,
+        json: async () => ({
+          output_text: JSON.stringify({
+            is_new_inquiry: true,
+            summary: '牛タンの見積依頼です。',
+            reason: '価格確認を求める新規問い合わせです。'
+          })
+        })
+      };
+    }
+  );
+
+  assert.equal(classification.isNewInquiry, true);
+  assert.equal(classification.summary, '牛タンの見積依頼です。');
+  assert.equal(classification.reason, '価格確認を求める新規問い合わせです。');
+});
+
+test('classifyGmailInquiry safely rejects invalid JSON', async () => {
+  const classification = await classifyGmailInquiry(
+    { subject: 'Hello', bodyText: 'Body' },
+    { apiKey: 'openai-key', model: 'test-model' },
+    async () => ({ ok: true, json: async () => ({ output_text: 'not json' }) })
+  );
+
+  assert.equal(classification.isNewInquiry, false);
+  assert.match(classification.reason, /JSON/);
+});
+
 test('buildGmailReplyDraftInput and buildGmailDraftHtml format content', () => {
   const input = buildGmailReplyDraftInput({
     from: 'Buyer <buyer@example.com>',
@@ -326,6 +369,19 @@ test('pollGmailMailbox creates a draft for a new inbox message', async () => {
         };
       }
       if (String(url).includes('api.openai.com')) {
+        const body = JSON.parse(options.body);
+        if (body.instructions.includes('classify incoming emails')) {
+          return {
+            ok: true,
+            json: async () => ({
+              output_text: JSON.stringify({
+                is_new_inquiry: true,
+                summary: '牛タンの見積依頼です。',
+                reason: '価格確認を求める新規の営業問い合わせです。'
+              })
+            })
+          };
+        }
         return { ok: true, json: async () => ({ output_text: 'Draft reply' }) };
       }
       if (String(url).endsWith('/drafts')) {
@@ -353,6 +409,82 @@ test('pollGmailMailbox creates a draft for a new inbox message', async () => {
   assert(calls.some((call) => call.url.endsWith('/drafts')));
   assert(calls.some((call) => call.url.endsWith('/labels')));
   assert(calls.some((call) => call.url.endsWith('/messages/draft-message-id/modify')));
+  assert(calls.some((call) => call.url === 'https://api.line.me/v2/bot/message/push'));
+});
+
+test('pollGmailMailbox skips draft creation for non-new inquiries and reports to LINE', async () => {
+  const calls = [];
+  const config = getGmailMonitorConfig({
+    GMAIL_MAILBOX: 'sales@suehirotrd.com',
+    GMAIL_STATE_PATH: 'unused-state.json',
+    OPENAI_API_KEY: 'openai-key',
+    OPENAI_MODEL: 'test-model',
+    GOOGLE_CLIENT_ID: 'client-id',
+    GOOGLE_CLIENT_SECRET: 'client-secret',
+    GOOGLE_REFRESH_TOKEN: 'refresh-token',
+    LINE_CHANNEL_ACCESS_TOKEN: 'line-token',
+    LINE_REPORT_TO_ID: 'line-user-id'
+  });
+  const logger = { info() {}, warn() {}, error() {} };
+
+  const result = await pollGmailMailbox(config, {
+    logger,
+    loadState: () => ({ initialized: true, historyId: '100', processedMessageIds: [] }),
+    saveState: () => {},
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      if (String(url).includes('oauth2.googleapis.com')) {
+        return { ok: true, json: async () => ({ access_token: 'gmail-token' }) };
+      }
+      if (String(url).includes('/history')) {
+        return {
+          ok: true,
+          json: async () => ({
+            historyId: '101',
+            history: [{ messagesAdded: [{ message: { id: 'message-id' } }] }]
+          })
+        };
+      }
+      if (String(url).includes('/messages/message-id')) {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'message-id',
+            threadId: 'thread-id',
+            labelIds: ['INBOX'],
+            snippet: 'Forwarder sales pitch.',
+            payload: {
+              headers: [
+                { name: 'Subject', value: 'Logistics service proposal' },
+                { name: 'From', value: 'Forwarder <sales@example.com>' }
+              ],
+              body: { data: Buffer.from('We would like to introduce our logistics service.', 'utf8').toString('base64url') },
+              mimeType: 'text/plain'
+            }
+          })
+        };
+      }
+      if (String(url).includes('api.openai.com')) {
+        return {
+          ok: true,
+          json: async () => ({
+            output_text: JSON.stringify({
+              is_new_inquiry: false,
+              summary: '物流会社からの営業提案です。',
+              reason: '顧客からの見積や商品問い合わせではありません。'
+            })
+          })
+        };
+      }
+      if (String(url).includes('api.line.me')) {
+        return { ok: true };
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    }
+  });
+
+  assert.equal(result.processed, 1);
+  assert(!calls.some((call) => call.url.endsWith('/drafts')));
   assert(calls.some((call) => call.url === 'https://api.line.me/v2/bot/message/push'));
 });
 
@@ -408,6 +540,19 @@ test('pollGmailMailbox creates AI Reply label when missing', async () => {
         };
       }
       if (String(url).includes('api.openai.com')) {
+        const body = JSON.parse(options.body);
+        if (body.instructions.includes('classify incoming emails')) {
+          return {
+            ok: true,
+            json: async () => ({
+              output_text: JSON.stringify({
+                is_new_inquiry: true,
+                summary: '牛タンの見積依頼です。',
+                reason: '価格確認を求める新規の営業問い合わせです。'
+              })
+            })
+          };
+        }
         return { ok: true, json: async () => ({ output_text: 'Draft reply' }) };
       }
       if (String(url).endsWith('/drafts')) {
@@ -461,13 +606,20 @@ test('buildGmailLineReport formats the new mail summary for LINE', () => {
       bodyText: 'Please quote beef tongue.\nWe need 20 cartons.'
     },
     { id: 'draft-id' },
-    '牛タン20カートンの見積依頼。'
+    '牛タン20カートンの見積依頼。',
+    {
+      isNewInquiry: true,
+      summary: '牛タン20カートンの見積依頼。',
+      reason: '価格確認を求める新規問い合わせです。'
+    }
   );
 
-  assert.match(report, /新着メール/);
+  assert.match(report, /メールを検知/);
+  assert.match(report, /判定: 新規問い合わせ/);
   assert.match(report, /Buyer <buyer@example\.com>/);
   assert.match(report, /Need quote/);
   assert.match(report, /牛タン20カートンの見積依頼。/);
+  assert.match(report, /価格確認を求める新規問い合わせ/);
   assert.match(report, /draft-id/);
 });
 
