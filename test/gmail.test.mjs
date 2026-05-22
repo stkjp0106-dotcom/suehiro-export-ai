@@ -5,6 +5,7 @@ import {
   buildGmailDraftHtml,
   buildGmailReplyDraftInput,
   buildReplyMime,
+  createGmailLabel,
   createGmailReplyDraft,
   findGmailLabelId,
   getGmailAccessToken,
@@ -91,6 +92,21 @@ test('addGmailLabels calls Gmail modify endpoint', async () => {
   });
 
   assert.deepEqual(result.labelIds, ['DRAFT', 'Label_2']);
+});
+
+test('createGmailLabel creates a visible Gmail label', async () => {
+  const labelId = await createGmailLabel('AI Reply', 'gmail-token', async (url, options) => {
+    assert.match(String(url), /\/gmail\/v1\/users\/me\/labels$/);
+    assert.equal(options.method, 'POST');
+    assert.deepEqual(JSON.parse(options.body), {
+      name: 'AI Reply',
+      labelListVisibility: 'labelShow',
+      messageListVisibility: 'show'
+    });
+    return { ok: true, json: async () => ({ id: 'Label_3', name: 'AI Reply' }) };
+  });
+
+  assert.equal(labelId, 'Label_3');
 });
 
 test('normalizeGmailMessage extracts headers and text body', () => {
@@ -337,6 +353,81 @@ test('pollGmailMailbox creates a draft for a new inbox message', async () => {
   assert(calls.some((call) => call.url.endsWith('/labels')));
   assert(calls.some((call) => call.url.endsWith('/messages/draft-message-id/modify')));
   assert(calls.some((call) => call.url === 'https://api.line.me/v2/bot/message/push'));
+});
+
+test('pollGmailMailbox creates AI Reply label when missing', async () => {
+  const calls = [];
+  const config = getGmailMonitorConfig({
+    GMAIL_MAILBOX: 'sales@suehirotrd.com',
+    GMAIL_STATE_PATH: 'unused-state.json',
+    OPENAI_API_KEY: 'openai-key',
+    OPENAI_MODEL: 'test-model',
+    GOOGLE_CLIENT_ID: 'client-id',
+    GOOGLE_CLIENT_SECRET: 'client-secret',
+    GOOGLE_REFRESH_TOKEN: 'refresh-token'
+  });
+  const logger = { info() {}, warn() {}, error() {} };
+
+  const result = await pollGmailMailbox(config, {
+    logger,
+    loadState: () => ({ initialized: true, historyId: '100', processedMessageIds: [] }),
+    saveState: () => {},
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      if (String(url).includes('oauth2.googleapis.com')) {
+        return { ok: true, json: async () => ({ access_token: 'gmail-token' }) };
+      }
+      if (String(url).includes('/history')) {
+        return {
+          ok: true,
+          json: async () => ({
+            historyId: '101',
+            history: [{ messagesAdded: [{ message: { id: 'message-id' } }] }]
+          })
+        };
+      }
+      if (String(url).includes('/messages/message-id')) {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'message-id',
+            threadId: 'thread-id',
+            labelIds: ['INBOX'],
+            snippet: 'Please quote.',
+            payload: {
+              headers: [
+                { name: 'Subject', value: 'Need quote' },
+                { name: 'From', value: 'Buyer <buyer@example.com>' },
+                { name: 'Message-ID', value: '<abc@example.com>' }
+              ],
+              body: { data: Buffer.from('Please quote beef tongue.', 'utf8').toString('base64url') },
+              mimeType: 'text/plain'
+            }
+          })
+        };
+      }
+      if (String(url).includes('api.openai.com')) {
+        return { ok: true, json: async () => ({ output_text: 'Draft reply' }) };
+      }
+      if (String(url).endsWith('/drafts')) {
+        return { ok: true, json: async () => ({ id: 'draft-id', message: { id: 'draft-message-id' } }) };
+      }
+      if (String(url).endsWith('/labels') && options.method === 'POST') {
+        return { ok: true, json: async () => ({ id: 'Label_3', name: 'AI Reply' }) };
+      }
+      if (String(url).endsWith('/labels')) {
+        return { ok: true, json: async () => ({ labels: [] }) };
+      }
+      if (String(url).endsWith('/messages/draft-message-id/modify')) {
+        return { ok: true, json: async () => ({ id: 'draft-message-id', labelIds: ['DRAFT', 'Label_3'] }) };
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    }
+  });
+
+  assert.equal(result.processed, 1);
+  assert(calls.some((call) => call.url.endsWith('/labels') && call.options.method === 'POST'));
+  assert(calls.some((call) => call.url.endsWith('/messages/draft-message-id/modify')));
 });
 
 test('buildGmailLineReport formats the new mail summary for LINE', () => {

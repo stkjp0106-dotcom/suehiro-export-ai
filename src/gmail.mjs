@@ -114,6 +114,19 @@ export async function findGmailLabelId(labelName, accessToken, fetchImpl = fetch
   return label?.id || '';
 }
 
+export async function createGmailLabel(labelName, accessToken, fetchImpl = fetch) {
+  const data = await gmailRequest('/labels', accessToken, {
+    method: 'POST',
+    fetchImpl,
+    body: {
+      name: labelName,
+      labelListVisibility: 'labelShow',
+      messageListVisibility: 'show'
+    }
+  });
+  return data.id || '';
+}
+
 export async function addGmailLabels(messageId, labelIds, accessToken, fetchImpl = fetch) {
   if (!messageId || !labelIds.length) {
     return null;

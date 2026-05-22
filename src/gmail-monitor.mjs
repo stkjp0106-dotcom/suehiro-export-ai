@@ -4,6 +4,7 @@ import {
   addGmailLabels,
   buildGmailDraftHtml,
   buildGmailReplyDraftInput,
+  createGmailLabel,
   createGmailReplyDraft as createGmailApiReplyDraft,
   findGmailLabelId,
   getGmailAccessToken,
@@ -162,7 +163,11 @@ export async function processGmailMessage(message, config, accessToken, options 
   );
   const draftMessageId = draft.message?.id || draft.messageId || '';
   if (config.draftLabelName && draftMessageId) {
-    const labelId = await findGmailLabelId(config.draftLabelName, accessToken, options.fetchImpl);
+    let labelId = await findGmailLabelId(config.draftLabelName, accessToken, options.fetchImpl);
+    if (!labelId) {
+      labelId = await createGmailLabel(config.draftLabelName, accessToken, options.fetchImpl);
+      logger.info(`Gmail draft label created: label=${JSON.stringify(config.draftLabelName)}`);
+    }
     if (labelId) {
       await addGmailLabels(draftMessageId, [labelId], accessToken, options.fetchImpl);
       logger.info(`Gmail draft labeled: draftMessageId=${draftMessageId} label=${JSON.stringify(config.draftLabelName)}`);
