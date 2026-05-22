@@ -6,7 +6,10 @@ import { loadKnowledgeContext } from './src/knowledge.mjs';
 import {
   applyProspectTargetMarketsCommand,
   getProspectMonitorConfig,
-  parseProspectTargetMarketsCommand
+  parseProspectRunCommand,
+  parseProspectTargetMarketsCommand,
+  runProspectSearch,
+  validateProspectMonitorConfig
 } from './src/prospect-monitor.mjs';
 import {
   buildGoogleAuthUrl,
@@ -107,6 +110,22 @@ const server = createServer(async (request, response) => {
         const prospectTargetMarketsCommand = parseProspectTargetMarketsCommand(userText);
         if (prospectTargetMarketsCommand) {
           return applyProspectTargetMarketsCommand(prospectTargetMarketsCommand, config.prospect);
+        }
+
+        if (parseProspectRunCommand(userText)) {
+          const missing = validateProspectMonitorConfig(config.prospect);
+          if (missing.length) {
+            return `営業候補検索を実行できません。未設定: ${missing.join(', ')}`;
+          }
+
+          runProspectSearch(config.prospect).catch((error) => {
+            console.error(`LINE requested prospect search failed: ${error.stack || error.message}`);
+          });
+          return [
+            '営業候補検索を開始しました。',
+            '完了したらLINEで候補とDraft IDを報告します。',
+            '自動送信はしません。'
+          ].join('\n');
         }
 
         if (!config.openaiApiKey) {

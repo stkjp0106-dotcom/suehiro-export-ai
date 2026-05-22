@@ -121,6 +121,46 @@ export function parseProspectTargetMarketsCommand(text) {
   return { action: 'set', targetMarkets: normalizeProspectTargetMarkets(argument) };
 }
 
+export function parseProspectRunCommand(text) {
+  const value = compactText(text);
+  const lowerValue = value.toLowerCase();
+  if (!value) {
+    return false;
+  }
+
+  if (/^(?:run\s*)?(?:prospect|prospects|sales\s*leads?|lead\s*search)(?:\s*(?:now|again))?$/.test(lowerValue)) {
+    return true;
+  }
+
+  if (value === '探して' || value === 'もう一度実行') {
+    return true;
+  }
+
+  const mentionsTaskRun = value.includes('24時間') && (
+    value.includes('タスク') ||
+    value.includes('実行') ||
+    value.includes('もう一度')
+  );
+  const mentionsProspectSearch = (
+    value.includes('輸入者') ||
+    value.includes('入力者') ||
+    value.includes('営業候補') ||
+    value.includes('候補')
+  ) && (
+    value.includes('探') ||
+    value.includes('検索') ||
+    value.includes('作成') ||
+    value.includes('実行')
+  );
+  const mentionsDraftCreation = value.includes('下書き') && value.includes('作成') && (
+    value.includes('営業') ||
+    value.includes('輸入者') ||
+    value.includes('入力者')
+  );
+
+  return mentionsTaskRun || mentionsProspectSearch || mentionsDraftCreation;
+}
+
 export function getEffectiveProspectTargetMarkets(config, state = {}) {
   return compactText(state.targetMarkets || config.targetMarkets || DEFAULT_TARGET_MARKETS);
 }

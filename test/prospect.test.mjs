@@ -7,6 +7,7 @@ import {
   discoverProspects,
   getEffectiveProspectTargetMarkets,
   getProspectMonitorConfig,
+  parseProspectRunCommand,
   parseProspectTargetMarketsCommand,
   parseProspects,
   runProspectSearch,
@@ -74,6 +75,16 @@ test('parseProspectTargetMarketsCommand handles set show and reset commands', ()
     targetMarkets: ''
   });
   assert.equal(parseProspectTargetMarketsCommand('こんにちは'), null);
+});
+
+test('parseProspectRunCommand handles natural LINE run requests', () => {
+  assert.equal(parseProspectRunCommand('24時間タスク、もう一度実行'), true);
+  assert.equal(parseProspectRunCommand('入力者候補を探してメール下書き作成して'), true);
+  assert.equal(parseProspectRunCommand('輸入者候補を探して'), true);
+  assert.equal(parseProspectRunCommand('営業候補探して'), true);
+  assert.equal(parseProspectRunCommand('探して'), true);
+  assert.equal(parseProspectRunCommand('prospects now'), true);
+  assert.equal(parseProspectRunCommand('香港向けの牛タンについて教えて'), false);
 });
 
 test('applyProspectTargetMarketsCommand saves and resets LINE target markets', () => {
