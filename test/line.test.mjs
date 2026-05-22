@@ -100,6 +100,43 @@ test('handleLineWebhook can reply with generated text', async () => {
   });
 });
 
+test('handleLineWebhook can reply to LINE command handlers before AI', async () => {
+  const body = JSON.stringify({
+    events: [
+      {
+        type: 'message',
+        replyToken: 'reply-token',
+        message: { type: 'text', text: '営業エリア 香港、タイ' }
+      }
+    ]
+  });
+  const secret = 'secret';
+  const signature = createHmac('sha256', secret).update(body).digest('base64');
+  const calls = [];
+
+  await handleLineWebhook(
+    body,
+    { 'x-line-signature': signature },
+    {
+      channelSecret: secret,
+      channelAccessToken: 'access-token',
+      createReply: async (text) => {
+        assert.equal(text, '営業エリア 香港、タイ');
+        return '営業ターゲットエリアを更新しました。';
+      }
+    },
+    async (url, options) => {
+      calls.push({ url, options });
+      return { ok: true };
+    }
+  );
+
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    replyToken: 'reply-token',
+    messages: [{ type: 'text', text: '営業ターゲットエリアを更新しました。' }]
+  });
+});
+
 test('handleLineWebhook sends a friendly message when reply generation fails', async () => {
   const body = JSON.stringify({
     events: [

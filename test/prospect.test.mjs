@@ -1,10 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  applyProspectTargetMarketsCommand,
   buildProspectLineReport,
   buildProspectSearchInput,
   discoverProspects,
+  getEffectiveProspectTargetMarkets,
   getProspectMonitorConfig,
+  parseProspectTargetMarketsCommand,
   parseProspects,
   runProspectSearch,
   validateProspectMonitorConfig
@@ -45,6 +48,56 @@ test('buildProspectSearchInput includes prior prospects', () => {
   assert.match(input, /Japanese wagyu beef/);
   assert.match(input, /factory\/processing/);
   assert.match(input, /used\.example\.com/);
+});
+
+test('buildProspectSearchInput uses target markets saved from LINE', () => {
+  const input = buildProspectSearchInput(
+    { targetMarkets: 'Hong Kong', products: 'wagyu', maxProspects: 5 },
+    { targetMarkets: 'United States, Canada', seenProspects: [] }
+  );
+
+  assert.match(input, /Target markets: United States, Canada/);
+  assert.doesNotMatch(input, /Target markets: Hong Kong/);
+});
+
+test('parseProspectTargetMarketsCommand handles set show and reset commands', () => {
+  assert.deepEqual(parseProspectTargetMarketsCommand('営業エリア 香港、シンガポール'), {
+    action: 'set',
+    targetMarkets: '香港, シンガポール'
+  });
+  assert.deepEqual(parseProspectTargetMarketsCommand('ターゲットエリア 確認'), {
+    action: 'show',
+    targetMarkets: ''
+  });
+  assert.deepEqual(parseProspectTargetMarketsCommand('target markets: reset'), {
+    action: 'reset',
+    targetMarkets: ''
+  });
+  assert.equal(parseProspectTargetMarketsCommand('こんにちは'), null);
+});
+
+test('applyProspectTargetMarketsCommand saves and resets LINE target markets', () => {
+  let state = { lastRunAt: '', seenProspects: [], targetMarkets: '' };
+  const config = { statePath: 'unused-state.json', targetMarkets: 'Hong Kong' };
+  const options = {
+    loadState: () => state,
+    saveState: (_path, nextState) => {
+      state = { ...nextState };
+    }
+  };
+
+  const setReply = applyProspectTargetMarketsCommand(
+    { action: 'set', targetMarkets: 'United States, Canada' },
+    config,
+    options
+  );
+  assert.equal(state.targetMarkets, 'United States, Canada');
+  assert.match(setReply, /United States, Canada/);
+  assert.equal(getEffectiveProspectTargetMarkets(config, state), 'United States, Canada');
+
+  const resetReply = applyProspectTargetMarketsCommand({ action: 'reset', targetMarkets: '' }, config, options);
+  assert.equal(state.targetMarkets, undefined);
+  assert.match(resetReply, /Hong Kong/);
 });
 
 test('parseProspects normalizes prospects with public emails', () => {

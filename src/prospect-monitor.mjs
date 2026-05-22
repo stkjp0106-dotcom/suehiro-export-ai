@@ -104,6 +104,61 @@ export function getProspectMonitorConfig(env = process.env) {
   };
 }
 
+export function parseProspectTargetMarketsCommand(text) {
+  const value = String(text || '').trim();
+  const match = value.match(/^(?:営業エリア|ターゲットエリア|target\s*markets?|prospect\s*markets?)\s*(?::|：)?\s*(.*)$/i);
+  if (!match) {
+    return null;
+  }
+
+  const argument = compactText(match[1] || '');
+  if (!argument || /^(?:確認|表示|check|show|current)$/i.test(argument)) {
+    return { action: 'show', targetMarkets: '' };
+  }
+  if (/^(?:リセット|reset|default|規定値)$/i.test(argument)) {
+    return { action: 'reset', targetMarkets: '' };
+  }
+  return { action: 'set', targetMarkets: normalizeProspectTargetMarkets(argument) };
+}
+
+export function getEffectiveProspectTargetMarkets(config, state = {}) {
+  return compactText(state.targetMarkets || config.targetMarkets || DEFAULT_TARGET_MARKETS);
+}
+
+export function applyProspectTargetMarketsCommand(command, config, options = {}) {
+  const loadState = options.loadState || loadProspectState;
+  const saveState = options.saveState || saveProspectState;
+  const state = loadState(config.statePath);
+
+  if (command.action === 'set') {
+    state.targetMarkets = command.targetMarkets;
+    saveState(config.statePath, state);
+    return [
+      '営業ターゲットエリアを更新しました。',
+      '',
+      `現在: ${getEffectiveProspectTargetMarkets(config, state)}`,
+      '',
+      '次回の24時間営業候補検索からこのエリアを使います。'
+    ].join('\n');
+  }
+
+  if (command.action === 'reset') {
+    delete state.targetMarkets;
+    saveState(config.statePath, state);
+    return [
+      '営業ターゲットエリアを規定値に戻しました。',
+      '',
+      `現在: ${getEffectiveProspectTargetMarkets(config, state)}`
+    ].join('\n');
+  }
+
+  return [
+    '現在の営業ターゲットエリアです。',
+    '',
+    getEffectiveProspectTargetMarkets(config, state)
+  ].join('\n');
+}
+
 export function validateProspectMonitorConfig(config) {
   const missing = [];
   if (!config.openaiApiKey) missing.push('OPENAI_API_KEY');
@@ -203,8 +258,9 @@ export async function discoverProspects(config, state = {}, fetchImpl = fetch) {
 }
 
 export function buildProspectSearchInput(config, state = {}) {
+  const targetMarkets = getEffectiveProspectTargetMarkets(config, state);
   return [
-    `Target markets: ${config.targetMarkets}`,
+    `Target markets: ${targetMarkets}`,
     `Target products: ${config.products}`,
     '',
     'SUEHIRO proposal context to reflect in every draft:',
@@ -266,13 +322,14 @@ export function parseProspects(text) {
 
 export function loadProspectState(path = DEFAULT_STATE_PATH) {
   if (!existsSync(path)) {
-    return { lastRunAt: '', seenProspects: [] };
+    return { lastRunAt: '', seenProspects: [], targetMarkets: '' };
   }
 
   const data = JSON.parse(readFileSync(path, 'utf8'));
   return {
     lastRunAt: data.lastRunAt || '',
-    seenProspects: Array.isArray(data.seenProspects) ? data.seenProspects : []
+    seenProspects: Array.isArray(data.seenProspects) ? data.seenProspects : [],
+    targetMarkets: data.targetMarkets || ''
   };
 }
 
@@ -302,6 +359,14 @@ function normalizeProspect(item) {
     draftSubject: String(item.draft_subject || '').trim() || 'Japanese wagyu export inquiry',
     draftBody: String(item.draft_body || '').trim()
   };
+}
+
+function normalizeProspectTargetMarkets(value) {
+  return compactText(String(value || '').replace(/[、，]/g, ', '));
+}
+
+function compactText(text) {
+  return String(text || '').replace(/\s+/g, ' ').trim();
 }
 
 function trimSeenProspects(state, limit = 500) {

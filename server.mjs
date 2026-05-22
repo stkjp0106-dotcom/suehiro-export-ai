@@ -4,6 +4,11 @@ import { handleLineWebhook } from './src/line.mjs';
 import { createSuehiroReply } from './src/openai.mjs';
 import { loadKnowledgeContext } from './src/knowledge.mjs';
 import {
+  applyProspectTargetMarketsCommand,
+  getProspectMonitorConfig,
+  parseProspectTargetMarketsCommand
+} from './src/prospect-monitor.mjs';
+import {
   buildGoogleAuthUrl,
   exchangeCodeForTokens,
   getValidAccessToken,
@@ -23,7 +28,8 @@ const config = {
   channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
   openaiApiKey: process.env.OPENAI_API_KEY,
   openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-  google: getGoogleConfig(process.env)
+  google: getGoogleConfig(process.env),
+  prospect: getProspectMonitorConfig(process.env)
 };
 config.google.tokenPath = resolveTokenPath(config.google);
 
@@ -98,6 +104,11 @@ const server = createServer(async (request, response) => {
       channelSecret: config.channelSecret,
       channelAccessToken: config.channelAccessToken,
       createReply: async (userText) => {
+        const prospectTargetMarketsCommand = parseProspectTargetMarketsCommand(userText);
+        if (prospectTargetMarketsCommand) {
+          return applyProspectTargetMarketsCommand(prospectTargetMarketsCommand, config.prospect);
+        }
+
         if (!config.openaiApiKey) {
           return 'OpenAI APIキーがまだ設定されていません。';
         }
