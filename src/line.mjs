@@ -94,6 +94,7 @@ export async function handleLineWebhook(body, headers, config, fetchImpl = fetch
   const events = Array.isArray(payload.events) ? payload.events : [];
 
   for (const event of events) {
+    logLineSource(event);
     if (event.type === 'message' && event.replyToken) {
       const text = await createReplyText(event, config);
       await replyToLine(event.replyToken, config.channelAccessToken, text, fetchImpl);
@@ -101,6 +102,19 @@ export async function handleLineWebhook(body, headers, config, fetchImpl = fetch
   }
 
   return { status: 200, body: 'OK' };
+}
+
+function logLineSource(event) {
+  const source = event?.source || {};
+  if (source.groupId) {
+    console.info(`LINE groupId: ${source.groupId}`);
+  }
+  if (source.roomId) {
+    console.info(`LINE roomId: ${source.roomId}`);
+  }
+  if (source.userId) {
+    console.info(`LINE userId: ${source.userId}`);
+  }
 }
 
 async function createReplyText(event, config) {
