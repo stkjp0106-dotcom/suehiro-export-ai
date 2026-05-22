@@ -4,9 +4,11 @@ import { handleLineWebhook } from './src/line.mjs';
 import { createSuehiroReply } from './src/openai.mjs';
 import { loadKnowledgeContext } from './src/knowledge.mjs';
 import {
+  applyProspectTargetProfileCommand,
   applyProspectTargetMarketsCommand,
   getProspectMonitorConfig,
   parseProspectRunCommand,
+  parseProspectTargetProfileCommand,
   parseProspectTargetMarketsCommand,
   runProspectSearch,
   validateProspectMonitorConfig
@@ -110,6 +112,11 @@ const server = createServer(async (request, response) => {
         const prospectTargetMarketsCommand = parseProspectTargetMarketsCommand(userText);
         if (prospectTargetMarketsCommand) {
           return applyProspectTargetMarketsCommand(prospectTargetMarketsCommand, config.prospect);
+        }
+
+        const prospectTargetProfileCommand = parseProspectTargetProfileCommand(userText);
+        if (prospectTargetProfileCommand) {
+          return applyProspectTargetProfileCommand(prospectTargetProfileCommand, config.prospect);
         }
 
         if (parseProspectRunCommand(userText)) {

@@ -88,6 +88,7 @@ export function getProspectMonitorConfig(env = process.env) {
     maxProspects: Number(env.PROSPECT_MAX_PROSPECTS || 5),
     statePath: env.PROSPECT_STATE_PATH || join(env.DATA_DIR || '.', DEFAULT_STATE_PATH),
     targetMarkets: env.PROSPECT_TARGET_MARKETS || DEFAULT_TARGET_MARKETS,
+    targetProfile: env.PROSPECT_TARGET_PROFILE || '',
     products: env.PROSPECT_PRODUCTS || DEFAULT_PRODUCTS,
     companyPitch: env.PROSPECT_COMPANY_PITCH || DEFAULT_COMPANY_PITCH,
     openaiApiKey: env.OPENAI_API_KEY,
@@ -163,6 +164,61 @@ export function parseProspectRunCommand(text) {
 
 export function getEffectiveProspectTargetMarkets(config, state = {}) {
   return compactText(state.targetMarkets || config.targetMarkets || DEFAULT_TARGET_MARKETS);
+}
+
+export function parseProspectTargetProfileCommand(text) {
+  const value = String(text || '').trim();
+  const match = value.match(/^(?:ターゲット条件|ターゲット像|顧客条件|顧客像|ターゲットキャラクター|target\s*(?:profile|character|criteria)|prospect\s*(?:profile|criteria))\s*(?::|：)?\s*(.*)$/i);
+  if (!match) {
+    return null;
+  }
+
+  const argument = compactText(match[1] || '');
+  if (!argument || /^(?:確認|表示|check|show|current)$/i.test(argument)) {
+    return { action: 'show', targetProfile: '' };
+  }
+  if (/^(?:リセット|reset|default|規定値)$/i.test(argument)) {
+    return { action: 'reset', targetProfile: '' };
+  }
+  return { action: 'set', targetProfile: argument };
+}
+
+export function getEffectiveProspectTargetProfile(config, state = {}) {
+  return compactText(state.targetProfile || config.targetProfile || '');
+}
+
+export function applyProspectTargetProfileCommand(command, config, options = {}) {
+  const loadState = options.loadState || loadProspectState;
+  const saveState = options.saveState || saveProspectState;
+  const state = loadState(config.statePath);
+
+  if (command.action === 'set') {
+    state.targetProfile = command.targetProfile;
+    saveState(config.statePath, state);
+    return [
+      '営業ターゲット条件を更新しました。',
+      '',
+      `現在: ${getEffectiveProspectTargetProfile(config, state)}`,
+      '',
+      '次回の営業候補検索からこの条件を優先します。'
+    ].join('\n');
+  }
+
+  if (command.action === 'reset') {
+    delete state.targetProfile;
+    saveState(config.statePath, state);
+    return [
+      '営業ターゲット条件を規定値に戻しました。',
+      '',
+      `現在: ${getEffectiveProspectTargetProfile(config, state) || '(指定なし)'}`
+    ].join('\n');
+  }
+
+  return [
+    '現在の営業ターゲット条件です。',
+    '',
+    getEffectiveProspectTargetProfile(config, state) || '(指定なし)'
+  ].join('\n');
 }
 
 export function applyProspectTargetMarketsCommand(command, config, options = {}) {
@@ -299,15 +355,21 @@ export async function discoverProspects(config, state = {}, fetchImpl = fetch) {
 
 export function buildProspectSearchInput(config, state = {}) {
   const targetMarkets = getEffectiveProspectTargetMarkets(config, state);
+  const targetProfile = getEffectiveProspectTargetProfile(config, state);
   return [
     `Target markets: ${targetMarkets}`,
     `Target products: ${config.products}`,
+    ...(targetProfile ? [
+      `Target customer profile: ${targetProfile}`,
+      'Prioritize prospects that match this profile, and mention the matching evidence in each draft.'
+    ] : []),
     '',
     'SUEHIRO proposal context to reflect in every draft:',
     config.companyPitch || DEFAULT_COMPANY_PITCH,
     '',
     'Draft quality requirements:',
     '- Mention a specific reason this prospect may be relevant based on public evidence.',
+    ...(targetProfile ? ['- Respect the target customer profile above; do not include prospects that clearly do not match it.'] : []),
     '- Clearly state that SUEHIRO would like to propose Japanese wagyu beef or related Japanese meat products.',
     '- Briefly explain SUEHIRO can coordinate product proposal, factory/processing, export documents, and logistics discussion.',
     '- Keep the email concise and conservative; no unconfirmed prices, certificates, approvals, stock, or lead times.',
@@ -362,14 +424,15 @@ export function parseProspects(text) {
 
 export function loadProspectState(path = DEFAULT_STATE_PATH) {
   if (!existsSync(path)) {
-    return { lastRunAt: '', seenProspects: [], targetMarkets: '' };
+    return { lastRunAt: '', seenProspects: [], targetMarkets: '', targetProfile: '' };
   }
 
   const data = JSON.parse(readFileSync(path, 'utf8'));
   return {
     lastRunAt: data.lastRunAt || '',
     seenProspects: Array.isArray(data.seenProspects) ? data.seenProspects : [],
-    targetMarkets: data.targetMarkets || ''
+    targetMarkets: data.targetMarkets || '',
+    targetProfile: data.targetProfile || ''
   };
 }
 

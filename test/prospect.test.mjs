@@ -1,13 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  applyProspectTargetProfileCommand,
   applyProspectTargetMarketsCommand,
   buildProspectLineReport,
   buildProspectSearchInput,
   discoverProspects,
+  getEffectiveProspectTargetProfile,
   getEffectiveProspectTargetMarkets,
   getProspectMonitorConfig,
   parseProspectRunCommand,
+  parseProspectTargetProfileCommand,
   parseProspectTargetMarketsCommand,
   parseProspects,
   runProspectSearch,
@@ -26,6 +29,7 @@ test('getProspectMonitorConfig reads scheduling and search settings', () => {
     PROSPECT_INTERVAL_HOURS: '12',
     PROSPECT_MAX_PROSPECTS: '3',
     PROSPECT_TARGET_MARKETS: 'Hong Kong',
+    PROSPECT_TARGET_PROFILE: 'Premium seafood importers with Japan import experience',
     PROSPECT_PRODUCTS: 'beef tongue',
     PROSPECT_COMPANY_PITCH: 'We propose Japanese wagyu and coordinate export documents.'
   });
@@ -33,6 +37,7 @@ test('getProspectMonitorConfig reads scheduling and search settings', () => {
   assert.equal(config.intervalHours, 12);
   assert.equal(config.maxProspects, 3);
   assert.equal(config.targetMarkets, 'Hong Kong');
+  assert.equal(config.targetProfile, 'Premium seafood importers with Japan import experience');
   assert.equal(config.products, 'beef tongue');
   assert.equal(config.companyPitch, 'We propose Japanese wagyu and coordinate export documents.');
   assert.deepEqual(validateProspectMonitorConfig(config), []);
@@ -61,6 +66,19 @@ test('buildProspectSearchInput uses target markets saved from LINE', () => {
   assert.doesNotMatch(input, /Target markets: Hong Kong/);
 });
 
+test('buildProspectSearchInput uses target profile saved from LINE', () => {
+  const input = buildProspectSearchInput(
+    { targetMarkets: 'Hong Kong', products: 'wagyu', maxProspects: 5 },
+    {
+      targetProfile: '日本からの輸入実績のある高級水産品の輸入会社',
+      seenProspects: []
+    }
+  );
+
+  assert.match(input, /Target customer profile: 日本からの輸入実績のある高級水産品の輸入会社/);
+  assert.match(input, /Respect the target customer profile/);
+});
+
 test('parseProspectTargetMarketsCommand handles set show and reset commands', () => {
   assert.deepEqual(parseProspectTargetMarketsCommand('営業エリア 香港、シンガポール'), {
     action: 'set',
@@ -77,6 +95,22 @@ test('parseProspectTargetMarketsCommand handles set show and reset commands', ()
   assert.equal(parseProspectTargetMarketsCommand('こんにちは'), null);
 });
 
+test('parseProspectTargetProfileCommand handles set show and reset commands', () => {
+  assert.deepEqual(parseProspectTargetProfileCommand('ターゲット条件 日本からの輸入実績のある高級水産品の輸入会社'), {
+    action: 'set',
+    targetProfile: '日本からの輸入実績のある高級水産品の輸入会社'
+  });
+  assert.deepEqual(parseProspectTargetProfileCommand('顧客条件 確認'), {
+    action: 'show',
+    targetProfile: ''
+  });
+  assert.deepEqual(parseProspectTargetProfileCommand('target profile: reset'), {
+    action: 'reset',
+    targetProfile: ''
+  });
+  assert.equal(parseProspectTargetProfileCommand('営業エリア 香港'), null);
+});
+
 test('parseProspectRunCommand handles natural LINE run requests', () => {
   assert.equal(parseProspectRunCommand('24時間タスク、もう一度実行'), true);
   assert.equal(parseProspectRunCommand('入力者候補を探してメール下書き作成して'), true);
@@ -85,6 +119,30 @@ test('parseProspectRunCommand handles natural LINE run requests', () => {
   assert.equal(parseProspectRunCommand('探して'), true);
   assert.equal(parseProspectRunCommand('prospects now'), true);
   assert.equal(parseProspectRunCommand('香港向けの牛タンについて教えて'), false);
+});
+
+test('applyProspectTargetProfileCommand saves and resets LINE target profile', () => {
+  let state = { lastRunAt: '', seenProspects: [], targetMarkets: '', targetProfile: '' };
+  const config = { statePath: 'unused-state.json', targetProfile: '' };
+  const options = {
+    loadState: () => state,
+    saveState: (_path, nextState) => {
+      state = { ...nextState };
+    }
+  };
+
+  const setReply = applyProspectTargetProfileCommand(
+    { action: 'set', targetProfile: 'Premium seafood importers with Japan import experience' },
+    config,
+    options
+  );
+  assert.equal(state.targetProfile, 'Premium seafood importers with Japan import experience');
+  assert.match(setReply, /Premium seafood importers/);
+  assert.equal(getEffectiveProspectTargetProfile(config, state), 'Premium seafood importers with Japan import experience');
+
+  const resetReply = applyProspectTargetProfileCommand({ action: 'reset', targetProfile: '' }, config, options);
+  assert.equal(state.targetProfile, undefined);
+  assert.match(resetReply, /\(指定なし\)/);
 });
 
 test('applyProspectTargetMarketsCommand saves and resets LINE target markets', () => {
