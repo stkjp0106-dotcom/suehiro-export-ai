@@ -80,6 +80,8 @@ test('discoverProspects uses OpenAI web search tool', async () => {
       assert.equal(url, 'https://api.openai.com/v1/responses');
       const body = JSON.parse(options.body);
       assert.deepEqual(body.tools, [{ type: 'web_search_preview' }]);
+      assert.equal(body.text.format.type, 'json_schema');
+      assert.equal(body.text.format.name, 'prospect_discovery');
       assert.match(body.input, /Hong Kong/);
       return {
         ok: true,

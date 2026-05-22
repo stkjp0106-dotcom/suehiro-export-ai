@@ -26,6 +26,47 @@ const PROSPECT_DISCOVERY_INSTRUCTIONS = [
   'draft_body must be a concise English cold outreach email body, no signature.'
 ].join('\n');
 
+const PROSPECT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    prospects: {
+      type: 'array',
+      maxItems: 5,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          company: { type: 'string' },
+          country: { type: 'string' },
+          website: { type: 'string' },
+          email: { type: 'string' },
+          contact_url: { type: 'string' },
+          evidence: { type: 'string' },
+          source_urls: {
+            type: 'array',
+            items: { type: 'string' }
+          },
+          draft_subject: { type: 'string' },
+          draft_body: { type: 'string' }
+        },
+        required: [
+          'company',
+          'country',
+          'website',
+          'email',
+          'contact_url',
+          'evidence',
+          'source_urls',
+          'draft_subject',
+          'draft_body'
+        ]
+      }
+    }
+  },
+  required: ['prospects']
+};
+
 export function getProspectMonitorConfig(env = process.env) {
   return {
     enabled: env.PROSPECT_MONITOR_ENABLED !== 'false',
@@ -125,6 +166,14 @@ export async function discoverProspects(config, state = {}, fetchImpl = fetch) {
       model: config.openaiModel,
       tools: [{ type: 'web_search_preview' }],
       tool_choice: 'auto',
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'prospect_discovery',
+          strict: true,
+          schema: PROSPECT_SCHEMA
+        }
+      },
       instructions: PROSPECT_DISCOVERY_INSTRUCTIONS,
       input: buildProspectSearchInput(config, state)
     })
