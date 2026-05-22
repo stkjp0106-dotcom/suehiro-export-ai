@@ -108,6 +108,19 @@ export async function createGmailReplyDraft(originalMessage, htmlBody, accessTok
   });
 }
 
+export async function createGmailOutboundDraft({ to, subject, htmlBody }, accessToken, fetchImpl = fetch) {
+  const raw = buildOutboundMime({ to, subject }, htmlBody);
+  return gmailRequest('/drafts', accessToken, {
+    method: 'POST',
+    fetchImpl,
+    body: {
+      message: {
+        raw
+      }
+    }
+  });
+}
+
 export async function findGmailLabelId(labelName, accessToken, fetchImpl = fetch) {
   const data = await gmailRequest('/labels', accessToken, { fetchImpl });
   const label = (data.labels || []).find((item) => item.name === labelName);
@@ -199,6 +212,18 @@ export function buildReplyMime(message, htmlBody) {
     `Subject: ${encodeMimeHeader(subject || 'Re:')}`,
     ...(message.messageId ? [`In-Reply-To: ${message.messageId}`] : []),
     ...(references ? [`References: ${references}`] : []),
+    'MIME-Version: 1.0',
+    'Content-Type: text/html; charset=UTF-8',
+    'Content-Transfer-Encoding: 8bit'
+  ];
+
+  return base64UrlEncode(`${headers.join('\r\n')}\r\n\r\n${htmlBody}`);
+}
+
+export function buildOutboundMime(message, htmlBody) {
+  const headers = [
+    `To: ${message.to}`,
+    `Subject: ${encodeMimeHeader(message.subject || '')}`,
     'MIME-Version: 1.0',
     'Content-Type: text/html; charset=UTF-8',
     'Content-Transfer-Encoding: 8bit'

@@ -182,16 +182,7 @@ export async function processGmailMessage(message, config, accessToken, options 
   );
 
   if (!classification.isNewInquiry) {
-    try {
-      await notifyLineAboutGmailMessage(normalized, config, {
-        classification,
-        draft: null,
-        logger,
-        fetchImpl: options.fetchImpl
-      });
-    } catch (error) {
-      logger.error(`LINE mail report failed: ${error.stack || error.message}`);
-    }
+    logger.info(`Gmail message skipped as non-new inquiry: messageId=${normalized.id}`);
     return { draftId: '', skipped: true, classification };
   }
 

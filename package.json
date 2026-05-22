@@ -10,6 +10,6 @@
     "outlook:worker": "node outlook-worker.mjs",
     "gmail:auth": "node gmail-auth-helper.mjs",
     "gmail:worker": "node gmail-worker.mjs",
-    "test": "node --test test/line.test.mjs test/openai.test.mjs test/knowledge.test.mjs test/google-drive.test.mjs test/outlook.test.mjs test/gmail.test.mjs"
+    "test": "node --test test/line.test.mjs test/openai.test.mjs test/knowledge.test.mjs test/google-drive.test.mjs test/outlook.test.mjs test/gmail.test.mjs test/prospect.test.mjs"
   }
 }

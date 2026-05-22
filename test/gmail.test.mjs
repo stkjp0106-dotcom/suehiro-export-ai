@@ -5,7 +5,9 @@ import {
   buildGmailDraftHtml,
   buildGmailReplyDraftInput,
   buildReplyMime,
+  buildOutboundMime,
   createGmailLabel,
+  createGmailOutboundDraft,
   createGmailReplyDraft,
   findGmailLabelId,
   getGmailAccessToken,
@@ -177,6 +179,35 @@ test('createGmailReplyDraft calls Gmail drafts endpoint', async () => {
   );
 
   assert.equal(draft.id, 'draft-id');
+});
+
+test('createGmailOutboundDraft creates a new cold outreach draft', async () => {
+  const draft = await createGmailOutboundDraft(
+    {
+      to: 'buyer@example.com',
+      subject: 'Japanese wagyu export inquiry',
+      htmlBody: '<p>Hello</p>'
+    },
+    'gmail-token',
+    async (url, options) => {
+      assert.match(String(url), /\/gmail\/v1\/users\/me\/drafts$/);
+      assert.equal(options.method, 'POST');
+      const body = JSON.parse(options.body);
+      const decoded = Buffer.from(body.message.raw.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+      assert.match(decoded, /To: buyer@example\.com/);
+      assert.match(decoded, /Subject: Japanese wagyu export inquiry/);
+      assert.match(decoded, /<p>Hello<\/p>/);
+      return { ok: true, json: async () => ({ id: 'outbound-draft-id' }) };
+    }
+  );
+
+  assert.equal(draft.id, 'outbound-draft-id');
+});
+
+test('buildOutboundMime encodes non-ascii subjects', () => {
+  const raw = buildOutboundMime({ to: 'buyer@example.com', subject: '和牛のご提案' }, '<p>Hello</p>');
+  const decoded = Buffer.from(raw.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+  assert.match(decoded, /Subject: =\?UTF-8\?B\?/);
 });
 
 test('createGmailAiReplyDraft asks OpenAI for an email body only', async () => {
@@ -412,7 +443,7 @@ test('pollGmailMailbox creates a draft for a new inbox message', async () => {
   assert(calls.some((call) => call.url === 'https://api.line.me/v2/bot/message/push'));
 });
 
-test('pollGmailMailbox skips draft creation for non-new inquiries and reports to LINE', async () => {
+test('pollGmailMailbox skips draft creation and LINE report for non-new inquiries', async () => {
   const calls = [];
   const config = getGmailMonitorConfig({
     GMAIL_MAILBOX: 'sales@suehirotrd.com',
@@ -477,7 +508,7 @@ test('pollGmailMailbox skips draft creation for non-new inquiries and reports to
         };
       }
       if (String(url).includes('api.line.me')) {
-        return { ok: true };
+        throw new Error('LINE should not be called for non-new inquiries');
       }
       throw new Error(`Unexpected URL: ${url}`);
     }
@@ -485,7 +516,7 @@ test('pollGmailMailbox skips draft creation for non-new inquiries and reports to
 
   assert.equal(result.processed, 1);
   assert(!calls.some((call) => call.url.endsWith('/drafts')));
-  assert(calls.some((call) => call.url === 'https://api.line.me/v2/bot/message/push'));
+  assert(!calls.some((call) => call.url === 'https://api.line.me/v2/bot/message/push'));
 });
 
 test('pollGmailMailbox creates AI Reply label when missing', async () => {
