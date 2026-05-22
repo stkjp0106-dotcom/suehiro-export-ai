@@ -39,6 +39,20 @@ const PROSPECT_DISCOVERY_INSTRUCTIONS = [
   'Do not write generic emails that could be sent to any company.'
 ].join('\n');
 
+const PROSPECT_LINE_COMMAND_INSTRUCTIONS = [
+  'You classify a LINE message for SUEHIRO TRADING prospect-search automation.',
+  'Return only compact JSON with keys: action, target_markets, target_profile, reason.',
+  'action must be one of: set_markets, show_markets, reset_markets, set_profile, show_profile, reset_profile, run_search, none.',
+  'Use set_markets when the user asks to target countries, regions, cities, or markets.',
+  'Use set_profile when the user describes the desired customer type, importer profile, company character, product category, industry, channel, or qualification.',
+  'Use run_search when the user asks to find prospects, create sales drafts, run the 24-hour task now, or search for importers.',
+  'Use none for normal Q&A, product questions, pricing questions, email replies, or vague messages that are not about prospect search automation.',
+  'If the user combines settings and search, choose the most important immediate action. Prefer run_search only when the user clearly asks to execute now.',
+  'Keep target_markets and target_profile as plain user-facing text without adding invented details.',
+  'If action is not set_markets, target_markets must be empty.',
+  'If action is not set_profile, target_profile must be empty.'
+].join('\n');
+
 const PROSPECT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -160,6 +174,59 @@ export function parseProspectRunCommand(text) {
   );
 
   return mentionsTaskRun || mentionsProspectSearch || mentionsDraftCreation;
+}
+
+export async function classifyProspectLineCommand(text, config, fetchImpl = fetch) {
+  if (!compactText(text) || !config.openaiApiKey) {
+    return { action: 'none', targetMarkets: '', targetProfile: '', reason: '' };
+  }
+
+  const response = await fetchImpl(OPENAI_RESPONSES_API_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.openaiApiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: config.openaiModel,
+      instructions: PROSPECT_LINE_COMMAND_INSTRUCTIONS,
+      input: String(text || '')
+    })
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`OpenAI prospect LINE command classification failed: ${response.status} ${detail}`);
+  }
+
+  const data = await response.json();
+  return parseProspectLineCommandClassification(extractOutputText(data));
+}
+
+export function parseProspectLineCommandClassification(text) {
+  const allowedActions = new Set([
+    'set_markets',
+    'show_markets',
+    'reset_markets',
+    'set_profile',
+    'show_profile',
+    'reset_profile',
+    'run_search',
+    'none'
+  ]);
+
+  try {
+    const parsed = JSON.parse(stripJsonCodeFence(text));
+    const action = allowedActions.has(parsed.action) ? parsed.action : 'none';
+    return {
+      action,
+      targetMarkets: action === 'set_markets' ? normalizeProspectTargetMarkets(parsed.target_markets || '') : '',
+      targetProfile: action === 'set_profile' ? compactText(parsed.target_profile || '') : '',
+      reason: compactText(parsed.reason || '')
+    };
+  } catch {
+    return { action: 'none', targetMarkets: '', targetProfile: '', reason: '' };
+  }
 }
 
 export function getEffectiveProspectTargetMarkets(config, state = {}) {

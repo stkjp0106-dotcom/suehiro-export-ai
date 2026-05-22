@@ -5,11 +5,13 @@ import {
   applyProspectTargetMarketsCommand,
   buildProspectLineReport,
   buildProspectSearchInput,
+  classifyProspectLineCommand,
   discoverProspects,
   getEffectiveProspectTargetProfile,
   getEffectiveProspectTargetMarkets,
   getProspectMonitorConfig,
   parseProspectRunCommand,
+  parseProspectLineCommandClassification,
   parseProspectTargetProfileCommand,
   parseProspectTargetMarketsCommand,
   parseProspects,
@@ -119,6 +121,54 @@ test('parseProspectRunCommand handles natural LINE run requests', () => {
   assert.equal(parseProspectRunCommand('探して'), true);
   assert.equal(parseProspectRunCommand('prospects now'), true);
   assert.equal(parseProspectRunCommand('香港向けの牛タンについて教えて'), false);
+});
+
+test('parseProspectLineCommandClassification handles natural command JSON', () => {
+  assert.deepEqual(parseProspectLineCommandClassification(JSON.stringify({
+    action: 'set_profile',
+    target_markets: '',
+    target_profile: '日本からの輸入実績のある高級水産品の輸入会社',
+    reason: 'target customer profile'
+  })), {
+    action: 'set_profile',
+    targetMarkets: '',
+    targetProfile: '日本からの輸入実績のある高級水産品の輸入会社',
+    reason: 'target customer profile'
+  });
+
+  assert.deepEqual(parseProspectLineCommandClassification('not json'), {
+    action: 'none',
+    targetMarkets: '',
+    targetProfile: '',
+    reason: ''
+  });
+});
+
+test('classifyProspectLineCommand asks OpenAI to route natural LINE messages', async () => {
+  const command = await classifyProspectLineCommand(
+    '香港で、日本からの輸入実績のある高級水産品の輸入会社を探して',
+    { openaiApiKey: 'openai-key', openaiModel: 'test-model' },
+    async (url, options) => {
+      assert.equal(url, 'https://api.openai.com/v1/responses');
+      const body = JSON.parse(options.body);
+      assert.equal(body.model, 'test-model');
+      assert.match(body.instructions, /prospect-search automation/);
+      assert.match(body.input, /高級水産品/);
+      return {
+        ok: true,
+        json: async () => ({
+          output_text: JSON.stringify({
+            action: 'run_search',
+            target_markets: '',
+            target_profile: '',
+            reason: 'User asks to find prospects now.'
+          })
+        })
+      };
+    }
+  );
+
+  assert.equal(command.action, 'run_search');
 });
 
 test('applyProspectTargetProfileCommand saves and resets LINE target profile', () => {

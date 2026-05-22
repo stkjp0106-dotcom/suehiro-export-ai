@@ -6,6 +6,7 @@ import { loadKnowledgeContext } from './src/knowledge.mjs';
 import {
   applyProspectTargetProfileCommand,
   applyProspectTargetMarketsCommand,
+  classifyProspectLineCommand,
   getProspectMonitorConfig,
   parseProspectRunCommand,
   parseProspectTargetProfileCommand,
@@ -120,19 +121,19 @@ const server = createServer(async (request, response) => {
         }
 
         if (parseProspectRunCommand(userText)) {
-          const missing = validateProspectMonitorConfig(config.prospect);
-          if (missing.length) {
-            return `営業候補検索を実行できません。未設定: ${missing.join(', ')}`;
-          }
+          return startProspectSearchFromLine(config.prospect);
+        }
 
-          runProspectSearch(config.prospect).catch((error) => {
-            console.error(`LINE requested prospect search failed: ${error.stack || error.message}`);
-          });
-          return [
-            '営業候補検索を開始しました。',
-            '完了したらLINEで候補とDraft IDを報告します。',
-            '自動送信はしません。'
-          ].join('\n');
+        if (config.openaiApiKey) {
+          try {
+            const naturalCommand = await classifyProspectLineCommand(userText, config.prospect);
+            const naturalReply = handleNaturalProspectLineCommand(naturalCommand, config.prospect);
+            if (naturalReply) {
+              return naturalReply;
+            }
+          } catch (error) {
+            console.error(`Prospect LINE command classification failed: ${error.stack || error.message}`);
+          }
         }
 
         if (!config.openaiApiKey) {
@@ -183,4 +184,56 @@ async function buildKnowledgeContext(userText, googleConfig) {
   }
 
   return chunks.filter(Boolean).join('\n\n');
+}
+
+function handleNaturalProspectLineCommand(command, prospectConfig) {
+  if (!command || command.action === 'none') {
+    return '';
+  }
+
+  if (command.action === 'set_markets') {
+    return applyProspectTargetMarketsCommand(
+      { action: 'set', targetMarkets: command.targetMarkets },
+      prospectConfig
+    );
+  }
+  if (command.action === 'show_markets') {
+    return applyProspectTargetMarketsCommand({ action: 'show', targetMarkets: '' }, prospectConfig);
+  }
+  if (command.action === 'reset_markets') {
+    return applyProspectTargetMarketsCommand({ action: 'reset', targetMarkets: '' }, prospectConfig);
+  }
+  if (command.action === 'set_profile') {
+    return applyProspectTargetProfileCommand(
+      { action: 'set', targetProfile: command.targetProfile },
+      prospectConfig
+    );
+  }
+  if (command.action === 'show_profile') {
+    return applyProspectTargetProfileCommand({ action: 'show', targetProfile: '' }, prospectConfig);
+  }
+  if (command.action === 'reset_profile') {
+    return applyProspectTargetProfileCommand({ action: 'reset', targetProfile: '' }, prospectConfig);
+  }
+  if (command.action === 'run_search') {
+    return startProspectSearchFromLine(prospectConfig);
+  }
+
+  return '';
+}
+
+function startProspectSearchFromLine(prospectConfig) {
+  const missing = validateProspectMonitorConfig(prospectConfig);
+  if (missing.length) {
+    return `営業候補検索を実行できません。未設定: ${missing.join(', ')}`;
+  }
+
+  runProspectSearch(prospectConfig).catch((error) => {
+    console.error(`LINE requested prospect search failed: ${error.stack || error.message}`);
+  });
+  return [
+    '営業候補検索を開始しました。',
+    '完了したらLINEで候補とDraft IDを報告します。',
+    '自動送信はしません。'
+  ].join('\n');
 }
