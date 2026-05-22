@@ -11,6 +11,13 @@ const OPENAI_RESPONSES_API_URL = 'https://api.openai.com/v1/responses';
 const DEFAULT_STATE_PATH = '.state/prospect-monitor.json';
 const DEFAULT_TARGET_MARKETS = 'Hong Kong, Singapore, Vietnam, Philippines, Thailand';
 const DEFAULT_PRODUCTS = 'Japanese wagyu beef, beef tongue, Japanese meat export';
+const DEFAULT_COMPANY_PITCH = [
+  'SUEHIRO TRADING Co., Ltd. is a Japan-based export partner for Japanese meat products.',
+  'We want to propose Japanese wagyu beef and related Japanese meat products to overseas importers, distributors, wholesalers, retailers, and food-service buyers.',
+  'We can support practical export coordination, including product proposal, factory/processing coordination, export documents, freight/logistics discussion, and buyer communication.',
+  'We should write conservatively: do not claim certifications, country eligibility, exclusive supply, exact prices, stock, lead times, or approvals unless confirmed.',
+  'Position us as a flexible export partner, not just a simple meat seller.'
+].join(' ');
 
 const PROSPECT_DISCOVERY_INSTRUCTIONS = [
   'You are a careful export sales assistant for SUEHIRO TRADING Co., Ltd.',
@@ -23,7 +30,13 @@ const PROSPECT_DISCOVERY_INSTRUCTIONS = [
   'Each prospect must have: company, country, website, email, contact_url, evidence, source_urls, draft_subject, draft_body.',
   'source_urls must be an array of URLs used as evidence.',
   'draft_subject must be an English email subject.',
-  'draft_body must be a concise English cold outreach email body, no signature.'
+  'draft_body must be a concise English cold outreach email body, no signature.',
+  'Each draft_body must be personalized to the prospect: mention a specific public feature, business type, product focus, channel, or location from the evidence.',
+  'Each draft_body must clearly say that SUEHIRO would like to propose Japanese wagyu beef or relevant Japanese meat products.',
+  'Each draft_body must briefly communicate what SUEHIRO can do: practical product proposals, export coordination, factory/processing coordination, documents, and logistics discussion.',
+  'Keep each draft_body short: 120 to 180 words, polite, direct, and easy to review.',
+  'End with a soft question asking whether they are interested in reviewing product information or discussing import needs.',
+  'Do not write generic emails that could be sent to any company.'
 ].join('\n');
 
 const PROSPECT_SCHEMA = {
@@ -76,6 +89,7 @@ export function getProspectMonitorConfig(env = process.env) {
     statePath: env.PROSPECT_STATE_PATH || join(env.DATA_DIR || '.', DEFAULT_STATE_PATH),
     targetMarkets: env.PROSPECT_TARGET_MARKETS || DEFAULT_TARGET_MARKETS,
     products: env.PROSPECT_PRODUCTS || DEFAULT_PRODUCTS,
+    companyPitch: env.PROSPECT_COMPANY_PITCH || DEFAULT_COMPANY_PITCH,
     openaiApiKey: env.OPENAI_API_KEY,
     openaiModel: env.PROSPECT_MODEL || env.OPENAI_MODEL || 'gpt-4o-mini',
     lineReport: {
@@ -192,6 +206,17 @@ export function buildProspectSearchInput(config, state = {}) {
   return [
     `Target markets: ${config.targetMarkets}`,
     `Target products: ${config.products}`,
+    '',
+    'SUEHIRO proposal context to reflect in every draft:',
+    config.companyPitch || DEFAULT_COMPANY_PITCH,
+    '',
+    'Draft quality requirements:',
+    '- Mention a specific reason this prospect may be relevant based on public evidence.',
+    '- Clearly state that SUEHIRO would like to propose Japanese wagyu beef or related Japanese meat products.',
+    '- Briefly explain SUEHIRO can coordinate product proposal, factory/processing, export documents, and logistics discussion.',
+    '- Keep the email concise and conservative; no unconfirmed prices, certificates, approvals, stock, or lead times.',
+    '- Do not include a signature; the system appends the standard SUEHIRO signature.',
+    '',
     `Find up to ${config.maxProspects} new prospects.`,
     '',
     'Already used prospects to avoid:',

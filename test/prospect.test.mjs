@@ -22,13 +22,15 @@ test('getProspectMonitorConfig reads scheduling and search settings', () => {
     PROSPECT_INTERVAL_HOURS: '12',
     PROSPECT_MAX_PROSPECTS: '3',
     PROSPECT_TARGET_MARKETS: 'Hong Kong',
-    PROSPECT_PRODUCTS: 'beef tongue'
+    PROSPECT_PRODUCTS: 'beef tongue',
+    PROSPECT_COMPANY_PITCH: 'We propose Japanese wagyu and coordinate export documents.'
   });
 
   assert.equal(config.intervalHours, 12);
   assert.equal(config.maxProspects, 3);
   assert.equal(config.targetMarkets, 'Hong Kong');
   assert.equal(config.products, 'beef tongue');
+  assert.equal(config.companyPitch, 'We propose Japanese wagyu and coordinate export documents.');
   assert.deepEqual(validateProspectMonitorConfig(config), []);
 });
 
@@ -40,6 +42,8 @@ test('buildProspectSearchInput includes prior prospects', () => {
 
   assert.match(input, /Hong Kong/);
   assert.match(input, /wagyu/);
+  assert.match(input, /Japanese wagyu beef/);
+  assert.match(input, /factory\/processing/);
   assert.match(input, /used\.example\.com/);
 });
 
@@ -82,6 +86,9 @@ test('discoverProspects uses OpenAI web search tool', async () => {
       assert.deepEqual(body.tools, [{ type: 'web_search_preview' }]);
       assert.equal(body.text.format.type, 'json_schema');
       assert.equal(body.text.format.name, 'prospect_discovery');
+      assert.match(body.instructions, /personalized to the prospect/);
+      assert.match(body.instructions, /SUEHIRO would like to propose Japanese wagyu beef/);
+      assert.match(body.instructions, /factory\/processing coordination/);
       assert.match(body.input, /Hong Kong/);
       return {
         ok: true,
