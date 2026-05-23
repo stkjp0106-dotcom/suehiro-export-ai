@@ -1,12 +1,18 @@
 import { createServer } from 'node:http';
+import { loadDotEnv } from './src/env.mjs';
 import { getGoogleConfig, buildGoogleAuthUrl, exchangeCodeForTokens } from './src/google-drive.mjs';
 import { GMAIL_SCOPES } from './src/gmail.mjs';
+
+loadDotEnv('.env.txt');
+loadDotEnv();
 
 const DEFAULT_AUTH_PORT = Number(process.env.AUTH_PORT || 3002);
 
 const config = {
   ...getGoogleConfig(process.env),
-  redirectUri: process.env.GOOGLE_REDIRECT_URI || `http://localhost:${DEFAULT_AUTH_PORT}/google/oauth2callback`
+  redirectUri: process.env.AUTH_PORT
+    ? `http://localhost:${DEFAULT_AUTH_PORT}/google/oauth2callback`
+    : process.env.GOOGLE_REDIRECT_URI || `http://localhost:${DEFAULT_AUTH_PORT}/google/oauth2callback`
 };
 const AUTH_PORT = Number(new URL(config.redirectUri).port || DEFAULT_AUTH_PORT);
 
@@ -21,7 +27,7 @@ const server = createServer(async (req, res) => {
   if (url.pathname === '/') {
     const authUrl = buildGoogleAuthUrl(config, GMAIL_SCOPES);
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(`<a href="${authUrl}">Authorize Gmail access</a>`);
+    res.end(`<a href="${authUrl}">Authorize Gmail + Drive access</a>`);
     return;
   }
 
@@ -37,7 +43,7 @@ const server = createServer(async (req, res) => {
       const tokens = await exchangeCodeForTokens(code, config);
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end([
-        'Gmail OAuth completed.',
+        'Gmail + Drive OAuth completed.',
         'Copy this value to Railway Variables:',
         '',
         `GOOGLE_REFRESH_TOKEN=${tokens.refresh_token || '(no refresh_token returned; revoke app access and retry)'}`
