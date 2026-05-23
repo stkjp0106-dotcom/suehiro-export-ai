@@ -38,6 +38,7 @@ import {
   getValidAccessToken,
   getGoogleConfig,
   hasGoogleConfig,
+  isGoogleAuthExpiredError,
   filterDriveDocumentFiles,
   isDriveFileDetailRequest,
   isDriveDocumentLookupRequest,
@@ -65,7 +66,8 @@ const config = {
   openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
   google: getGoogleConfig(process.env),
   prospect: getProspectMonitorConfig(process.env),
-  lineDriveContextPath: process.env.LINE_DRIVE_CONTEXT_PATH || join(process.env.DATA_DIR || '.', '.state/line-drive-context.json')
+  lineDriveContextPath: process.env.LINE_DRIVE_CONTEXT_PATH || join(process.env.DATA_DIR || '.', '.state/line-drive-context.json'),
+  publicBaseUrl: (process.env.PUBLIC_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || '').replace(/\/+$/, '')
 };
 config.google.tokenPath = resolveTokenPath(config.google);
 
@@ -273,6 +275,9 @@ async function deleteTodayGmailDraftsFromLine(googleConfig) {
     ].join('\n');
   } catch (error) {
     console.error(`Delete today Gmail drafts failed: ${error.stack || error.message}`);
+    if (isGoogleAuthExpiredError(error)) {
+      return buildGoogleReauthMessage('Google認証が切れているため、今日作成のGmail下書きを削除できませんでした。');
+    }
     return `今日作成のGmail下書き削除でエラーが出ました: ${error.message}`;
   }
 }
@@ -309,6 +314,9 @@ async function answerDriveLookup(userText, googleConfig, contextPath) {
     });
   } catch (error) {
     console.error(error);
+    if (isGoogleAuthExpiredError(error)) {
+      return buildGoogleReauthMessage('Google認証が切れているため、Drive検索を実行できませんでした。');
+    }
     if (isGoogleDriveScopeError(error)) {
       return [
         'Google Driveを見る権限が今のGoogle認可トークンに入っていません。',
@@ -346,6 +354,9 @@ async function answerDriveDocumentLookup(userText, googleConfig, contextPath) {
     });
   } catch (error) {
     console.error(error);
+    if (isGoogleAuthExpiredError(error)) {
+      return buildGoogleReauthMessage('Google認証が切れているため、Drive書類検索を実行できませんでした。');
+    }
     if (isGoogleDriveScopeError(error)) {
       return 'Google Driveを見る権限が今のGoogle認可トークンに入っていません。Drive閲覧権限つきで再認可してください。';
     }
@@ -385,6 +396,9 @@ async function answerDriveFileDetail(userText, googleConfig, context) {
     return summarizeDriveFileAmount({ file, amountCandidates, text });
   } catch (error) {
     console.error(error);
+    if (isGoogleAuthExpiredError(error)) {
+      return buildGoogleReauthMessage('Google認証が切れているため、DriveのPDF確認を実行できませんでした。');
+    }
     if (isGoogleDriveScopeError(error)) {
       return 'Google Driveを見る権限が今のGoogle認可トークンに入っていません。Drive閲覧権限つきで再認可してください。';
     }
@@ -434,6 +448,28 @@ function saveLineDriveContext(contextPath, context) {
   } catch (error) {
     console.error(`LINE Drive context save failed: ${error.message}`);
   }
+}
+
+function buildGoogleReauthMessage(reason) {
+  return [
+    reason,
+    '',
+    '下記URLからGoogle再認証してください。',
+    getGoogleAuthUrlForLine(),
+    '',
+    '再認証後、もう一度同じ操作を送ってください。'
+  ].join('\n');
+}
+
+function getGoogleAuthUrlForLine() {
+  if (config.publicBaseUrl) {
+    const baseUrl = config.publicBaseUrl.startsWith('http')
+      ? config.publicBaseUrl
+      : `https://${config.publicBaseUrl}`;
+    return `${baseUrl.replace(/\/+$/, '')}/google/auth`;
+  }
+
+  return '/google/auth';
 }
 
 function isGoogleDriveScopeError(error) {

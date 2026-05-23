@@ -13,6 +13,7 @@ import {
   listGmailHistory,
   normalizeGmailMessage
 } from './gmail.mjs';
+import { isGoogleAuthExpiredError } from './google-drive.mjs';
 import { pushLineText } from './line.mjs';
 
 const OPENAI_RESPONSES_API_URL = 'https://api.openai.com/v1/responses';
@@ -58,6 +59,7 @@ export function getGmailMonitorConfig(env = process.env) {
     processExistingOnFirstRun: env.GMAIL_PROCESS_EXISTING_ON_FIRST_RUN === 'true',
     openaiApiKey: env.OPENAI_API_KEY,
     openaiModel: env.OPENAI_MODEL || 'gpt-4o-mini',
+    publicBaseUrl: (env.PUBLIC_BASE_URL || env.RAILWAY_PUBLIC_DOMAIN || '').replace(/\/+$/, ''),
     lineReport: {
       to: env.LINE_REPORT_TO_ID || env.LINE_USER_ID || '',
       channelAccessToken: env.LINE_CHANNEL_ACCESS_TOKEN || ''
@@ -86,6 +88,7 @@ export async function runGmailMonitor(config, options = {}) {
   const logger = options.logger || console;
   const sleep = options.sleep || delay;
   let stopped = false;
+  let googleAuthExpiredNotified = false;
 
   const stop = () => {
     stopped = true;
@@ -96,8 +99,21 @@ export async function runGmailMonitor(config, options = {}) {
   while (!stopped) {
     try {
       await pollGmailMailbox(config, { logger, fetchImpl: options.fetchImpl });
+      googleAuthExpiredNotified = false;
     } catch (error) {
       logger.error(`Gmail monitor poll failed: ${error.stack || error.message}`);
+      if (isGoogleAuthExpiredError(error) && !googleAuthExpiredNotified) {
+        try {
+          await notifyLineAboutGoogleReauth(config, {
+            logger,
+            fetchImpl: options.fetchImpl,
+            reason: 'Google認証が切れているため、メール監視と下書き作成を実行できませんでした。'
+          });
+          googleAuthExpiredNotified = true;
+        } catch (lineError) {
+          logger.error(`LINE Google reauth report failed: ${lineError.stack || lineError.message}`);
+        }
+      }
     }
 
     if (!stopped) {
@@ -107,6 +123,41 @@ export async function runGmailMonitor(config, options = {}) {
 
   logger.info('Gmail monitor stopped');
   return { stop };
+}
+
+export async function notifyLineAboutGoogleReauth(config, options = {}) {
+  const logger = options.logger || console;
+  const lineReport = config.lineReport || {};
+  if (!lineReport.to || !lineReport.channelAccessToken) {
+    logger.warn('LINE Google reauth report skipped: LINE_REPORT_TO_ID or LINE_CHANNEL_ACCESS_TOKEN is not configured');
+    return false;
+  }
+
+  const text = buildGoogleReauthLineMessage(config, options.reason);
+  await pushLineText(lineReport.to, lineReport.channelAccessToken, text, options.fetchImpl);
+  logger.info('LINE Google reauth report sent');
+  return true;
+}
+
+export function buildGoogleReauthLineMessage(config, reason = 'Google認証が切れています。') {
+  return [
+    reason,
+    '',
+    '下記URLからGoogle再認証してください。',
+    buildGoogleAuthUrlForLine(config),
+    '',
+    '再認証後、もう一度同じ操作を送ってください。'
+  ].join('\n');
+}
+
+export function buildGoogleAuthUrlForLine(config = {}) {
+  const rawBaseUrl = String(config.publicBaseUrl || process.env.PUBLIC_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || '').trim();
+  if (!rawBaseUrl) {
+    return '/google/auth';
+  }
+
+  const baseUrl = rawBaseUrl.startsWith('http') ? rawBaseUrl : `https://${rawBaseUrl}`;
+  return `${baseUrl.replace(/\/+$/, '')}/google/auth`;
 }
 
 export async function pollGmailMailbox(config, options = {}) {

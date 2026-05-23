@@ -13,6 +13,7 @@ import {
   findDriveInvoiceFiles,
   isDriveDocumentLookupRequest,
   isDriveFileDetailRequest,
+  isGoogleAuthExpiredError,
   isDriveInvoiceLookupRequest,
   isDriveLookupRequest,
   listDriveFolderChildren,
@@ -38,6 +39,14 @@ test('buildGoogleAuthUrl creates a Drive readonly consent URL', () => {
   assert.equal(url.searchParams.get('redirect_uri'), 'http://localhost:3000/google/oauth2callback');
   assert.equal(url.searchParams.get('access_type'), 'offline');
   assert.match(url.searchParams.get('scope'), /drive\.readonly/);
+});
+
+test('isGoogleAuthExpiredError detects expired refresh token failures', () => {
+  assert.equal(
+    isGoogleAuthExpiredError(new Error('Google token request failed: 400 {"error":"invalid_grant"}')),
+    true
+  );
+  assert.equal(isGoogleAuthExpiredError(new Error('Google Drive search failed: 403 insufficientPermissions')), false);
 });
 
 test('exchangeCodeForTokens posts to Google token endpoint', async () => {

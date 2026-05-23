@@ -29,6 +29,7 @@ import {
   getGmailMonitorConfig,
   labelGmailDraft,
   notifyLineAboutGmailDraft,
+  notifyLineAboutGoogleReauth,
   pollGmailMailbox
 } from '../src/gmail-monitor.mjs';
 
@@ -795,4 +796,31 @@ test('notifyLineAboutGmailDraft skips when LINE report env is missing', async ()
 
   assert.equal(result, false);
   assert.match(warnings[0], /LINE mail report skipped/);
+});
+
+test('notifyLineAboutGoogleReauth includes the public auth URL in LINE', async () => {
+  const calls = [];
+  const result = await notifyLineAboutGoogleReauth(
+    {
+      publicBaseUrl: 'https://example.up.railway.app/',
+      lineReport: {
+        to: 'line-group-id',
+        channelAccessToken: 'line-token'
+      }
+    },
+    {
+      logger: { info() {}, warn() {} },
+      reason: 'Google認証が切れています。',
+      fetchImpl: async (url, options) => {
+        calls.push({ url: String(url), body: JSON.parse(options.body) });
+        return { ok: true, json: async () => ({}) };
+      }
+    }
+  );
+
+  assert.equal(result, true);
+  assert.equal(calls[0].url, 'https://api.line.me/v2/bot/message/push');
+  assert.equal(calls[0].body.to, 'line-group-id');
+  assert.match(calls[0].body.messages[0].text, /Google認証が切れています。/);
+  assert.match(calls[0].body.messages[0].text, /https:\/\/example\.up\.railway\.app\/google\/auth/);
 });

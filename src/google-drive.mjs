@@ -24,6 +24,11 @@ export function hasGoogleConfig(config) {
   return Boolean(config.clientId && config.clientSecret && config.redirectUri);
 }
 
+export function isGoogleAuthExpiredError(error) {
+  const message = String(error?.message || '');
+  return /invalid_grant|Token has been expired or revoked|Bad Request/i.test(message);
+}
+
 export function buildGoogleAuthUrl(config, scope = DRIVE_READONLY_SCOPE) {
   const url = new URL(GOOGLE_AUTH_URL);
   url.searchParams.set('client_id', config.clientId);
