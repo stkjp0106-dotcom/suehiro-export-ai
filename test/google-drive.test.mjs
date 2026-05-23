@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import {
   buildDriveLookupQuery,
   buildGoogleAuthUrl,
+  downloadDriveFile,
   exchangeCodeForTokens,
+  extractAmountCandidates,
+  extractDriveReference,
+  findDriveContextFile,
+  isDriveFileDetailRequest,
   isDriveLookupRequest,
   listDriveFolderChildren,
   refreshAccessToken,
@@ -124,6 +129,53 @@ test('listDriveFolderChildren lists visible folder contents', async () => {
   });
 
   assert.equal(results[0].name, 'price-list.pdf');
+});
+
+test('downloadDriveFile downloads Drive file media', async () => {
+  const buffer = await downloadDriveFile('file-id', 'access-token', async (url, options) => {
+    assert.equal(options.headers.Authorization, 'Bearer access-token');
+    assert.match(url, /drive\/v3\/files\/file-id\?alt=media/);
+    return {
+      ok: true,
+      arrayBuffer: async () => new TextEncoder().encode('PDF text').buffer
+    };
+  });
+
+  assert.equal(buffer.toString('utf8'), 'PDF text');
+});
+
+test('Drive detail helpers understand follow-up invoice amount questions', () => {
+  const context = {
+    files: [
+      {
+        id: 'can015',
+        name: 'CAN015 INV.pdf',
+        mimeType: 'application/pdf',
+        webViewLink: 'https://drive.google.com/file/d/can015'
+      },
+      {
+        id: 'can014',
+        name: 'CAN014 Commercial Invoice .pdf',
+        mimeType: 'application/pdf'
+      }
+    ]
+  };
+
+  assert.equal(isDriveFileDetailRequest('CAN015の金額だね', context), true);
+  assert.equal(isDriveFileDetailRequest('014は？', context), true);
+  assert.equal(extractDriveReference('CAN015の金額だね'), 'CAN015');
+  assert.equal(findDriveContextFile('014は？', context.files).id, 'can014');
+});
+
+test('extractAmountCandidates prefers total amount lines', () => {
+  const candidates = extractAmountCandidates([
+    'Unit price USD 12.50',
+    'Subtotal USD 1,200.00',
+    'Grand Total USD 1,350.00',
+    'Bank: Example Bank'
+  ].join('\n'));
+
+  assert.equal(candidates[0], 'Grand Total USD 1,350.00');
 });
 
 test('Drive lookup helpers detect folder questions and summarize results', () => {

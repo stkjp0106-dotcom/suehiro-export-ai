@@ -1,4 +1,6 @@
 import { createServer } from 'node:http';
+import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { loadDotEnv } from './src/env.mjs';
 import { handleLineWebhook } from './src/line.mjs';
 import { createSuehiroReply } from './src/openai.mjs';
@@ -16,17 +18,25 @@ import {
 } from './src/prospect-monitor.mjs';
 import {
   buildGoogleAuthUrl,
+  downloadDriveFile,
+  DRIVE_FOLDER_MIME_TYPE,
+  extractAmountCandidates,
   buildDriveLookupQuery,
   exchangeCodeForTokens,
+  extractDriveReference,
+  extractPdfText,
+  findDriveContextFile,
   getValidAccessToken,
   getGoogleConfig,
   hasGoogleConfig,
+  isDriveFileDetailRequest,
   isDriveLookupRequest,
   listDriveFolderChildren,
   resolveTokenPath,
   saveGoogleTokens,
   searchDriveFolders,
   searchDriveFiles,
+  summarizeDriveFileAmount,
   summarizeDriveLookup,
   summarizeDriveFiles
 } from './src/google-drive.mjs';
@@ -40,7 +50,8 @@ const config = {
   openaiApiKey: process.env.OPENAI_API_KEY,
   openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
   google: getGoogleConfig(process.env),
-  prospect: getProspectMonitorConfig(process.env)
+  prospect: getProspectMonitorConfig(process.env),
+  lineDriveContextPath: process.env.LINE_DRIVE_CONTEXT_PATH || join(process.env.DATA_DIR || '.', '.state/line-drive-context.json')
 };
 config.google.tokenPath = resolveTokenPath(config.google);
 
@@ -149,8 +160,13 @@ const server = createServer(async (request, response) => {
           return 'テキストで送ってください。';
         }
 
+        const lineDriveContext = loadLineDriveContext(config.lineDriveContextPath);
+        if (isDriveFileDetailRequest(userText, lineDriveContext)) {
+          return answerDriveFileDetail(userText, config.google, lineDriveContext);
+        }
+
         if (isDriveLookupRequest(userText)) {
-          return answerDriveLookup(userText, config.google);
+          return answerDriveLookup(userText, config.google, config.lineDriveContextPath);
         }
 
         return createSuehiroReply(userText, {
@@ -195,7 +211,7 @@ async function buildKnowledgeContext(userText, googleConfig) {
   return chunks.filter(Boolean).join('\n\n');
 }
 
-async function answerDriveLookup(userText, googleConfig) {
+async function answerDriveLookup(userText, googleConfig, contextPath) {
   if (!hasGoogleConfig(googleConfig)) {
     return 'Google Drive検索の設定が未完了です。GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI を確認してください。';
   }
@@ -218,6 +234,7 @@ async function answerDriveLookup(userText, googleConfig) {
       childrenByFolder.push(await listDriveFolderChildren(folder.id, accessToken));
     }
     const files = folders.length ? [] : await searchDriveFiles(query, accessToken);
+    saveLineDriveContext(contextPath, buildLineDriveContext(query, selectedFolders, childrenByFolder, files));
     return summarizeDriveLookup({
       query,
       folders: selectedFolders,
@@ -234,6 +251,89 @@ async function answerDriveLookup(userText, googleConfig) {
       ].join('\n');
     }
     return `Google Drive検索でエラーが出ました: ${error.message}`;
+  }
+}
+
+async function answerDriveFileDetail(userText, googleConfig, context) {
+  if (!hasGoogleConfig(googleConfig)) {
+    return 'Google Drive検索の設定が未完了です。GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI を確認してください。';
+  }
+
+  try {
+    const accessToken = await getValidAccessToken(googleConfig);
+    if (!accessToken) {
+      return 'Google Driveの認可がまだ完了していません。/google/auth で認可してください。';
+    }
+
+    let file = findDriveContextFile(userText, context?.files || []);
+    if (!file) {
+      const reference = extractDriveReference(userText);
+      const files = reference ? await searchDriveFiles(reference, accessToken) : [];
+      file = findDriveContextFile(userText, files) || files.find((candidate) => candidate.mimeType === 'application/pdf') || files[0];
+    }
+
+    if (!file) {
+      return '該当するDriveファイルを見つけられませんでした。直前にフォルダ名を送ってから、CAN015の金額 のように聞いてください。';
+    }
+
+    if (file.mimeType !== 'application/pdf') {
+      return `${file.name} はPDFではないため、今の読み取り対象外です。\n${file.webViewLink || ''}`.trim();
+    }
+
+    const buffer = await downloadDriveFile(file.id, accessToken);
+    const text = await extractPdfText(buffer);
+    const amountCandidates = extractAmountCandidates(text);
+    return summarizeDriveFileAmount({ file, amountCandidates, text });
+  } catch (error) {
+    console.error(error);
+    if (isGoogleDriveScopeError(error)) {
+      return 'Google Driveを見る権限が今のGoogle認可トークンに入っていません。Drive閲覧権限つきで再認可してください。';
+    }
+    return `DriveのPDF確認でエラーが出ました: ${error.message}`;
+  }
+}
+
+function buildLineDriveContext(query, folders, childrenByFolder, files) {
+  const childFiles = childrenByFolder.flatMap((children, folderIndex) => {
+    const folder = folders[folderIndex];
+    return (children || []).map((child) => ({
+      ...child,
+      parentFolderId: folder?.id,
+      parentFolderName: folder?.name
+    }));
+  });
+
+  return {
+    query,
+    updatedAt: new Date().toISOString(),
+    folders,
+    files: [...childFiles, ...files]
+      .filter((file) => file && file.mimeType !== DRIVE_FOLDER_MIME_TYPE)
+      .slice(0, 100)
+  };
+}
+
+function loadLineDriveContext(contextPath) {
+  try {
+    if (!contextPath || !existsSync(contextPath)) {
+      return null;
+    }
+    return JSON.parse(readFileSync(contextPath, 'utf8'));
+  } catch (error) {
+    console.error(`LINE Drive context load failed: ${error.message}`);
+    return null;
+  }
+}
+
+function saveLineDriveContext(contextPath, context) {
+  try {
+    if (!contextPath) {
+      return;
+    }
+    mkdirSync(dirname(contextPath), { recursive: true });
+    writeFileSync(contextPath, JSON.stringify(context, null, 2), 'utf8');
+  } catch (error) {
+    console.error(`LINE Drive context save failed: ${error.message}`);
   }
 }
 

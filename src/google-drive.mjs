@@ -5,6 +5,8 @@ const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files';
 export const DRIVE_READONLY_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+export const DRIVE_FOLDER_MIME_TYPE = 'application/vnd.google-apps.folder';
+export const DRIVE_PDF_MIME_TYPE = 'application/pdf';
 const DEFAULT_TOKEN_PATH = '.tokens/google-drive.json';
 
 export function getGoogleConfig(env = process.env) {
@@ -206,6 +208,125 @@ export async function listDriveFolderChildren(folderId, accessToken, fetchImpl =
   return data.files || [];
 }
 
+export async function downloadDriveFile(fileId, accessToken, fetchImpl = fetch) {
+  const url = new URL(`${DRIVE_FILES_URL}/${encodeURIComponent(fileId)}`);
+  url.searchParams.set('alt', 'media');
+  url.searchParams.set('supportsAllDrives', 'true');
+
+  const response = await fetchImpl(url.toString(), {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Google Drive file download failed: ${response.status} ${detail}`);
+  }
+
+  return Buffer.from(await response.arrayBuffer());
+}
+
+export async function extractPdfText(buffer) {
+  const pdfParseModule = await import('pdf-parse');
+  const pdfParse = pdfParseModule.default || pdfParseModule;
+  const parsed = await pdfParse(buffer);
+  return parsed.text || '';
+}
+
+export function isDriveFileDetailRequest(text, context = null) {
+  const value = String(text || '').trim();
+  if (!value) {
+    return false;
+  }
+
+  const asksForAmount = /金額|価格|値段|請求|合計|販売|売上|amount|total|price|invoice/i.test(value);
+  if (asksForAmount && extractDriveReference(value)) {
+    return true;
+  }
+
+  const hasRecentFiles = Array.isArray(context?.files) && context.files.length > 0;
+  return hasRecentFiles && /^[A-Z]*\s*\d{2,5}\s*(?:は|って|かな)?\s*(?:？|\?)?$/i.test(value);
+}
+
+export function extractDriveReference(text) {
+  const value = String(text || '').trim();
+  const prefixed = value.match(/\b([A-Z]{2,}\s*[-_]?\s*\d{2,6})\b/i);
+  if (prefixed) {
+    return normalizeDriveReference(prefixed[1]);
+  }
+
+  const numeric = value.match(/\b(\d{2,6})\b/);
+  return numeric ? normalizeDriveReference(numeric[1]) : '';
+}
+
+export function findDriveContextFile(text, files = []) {
+  const reference = extractDriveReference(text);
+  if (!reference) {
+    return null;
+  }
+
+  const normalizedFiles = files.map((file) => ({
+    file,
+    normalizedName: normalizeDriveReference(file.name || '')
+  }));
+
+  const exact = normalizedFiles.find(({ normalizedName }) => normalizedName.includes(reference));
+  if (exact) {
+    return exact.file;
+  }
+
+  const digits = reference.match(/\d+/)?.[0] || reference;
+  const digitMatch = normalizedFiles.find(({ normalizedName }) => normalizedName.includes(digits));
+  return digitMatch?.file || null;
+}
+
+export function extractAmountCandidates(text, limit = 6) {
+  const lines = String(text || '')
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  const amountPattern = /(?:USD|US\$|JPY|¥|￥|EUR|GBP|HKD|SGD|AUD|CAD|\$)\s*[-+]?\d[\d,]*(?:\.\d{1,2})?|\d[\d,]*(?:\.\d{1,2})?\s*(?:USD|JPY|YEN|EUR|GBP|HKD|SGD|AUD|CAD)/i;
+  const strongLabelPattern = /grand\s*total|invoice\s*total|total\s*amount|amount\s*due|balance\s*due|total|合計|総額|請求額|金額/i;
+
+  const scored = [];
+  for (const [index, line] of lines.entries()) {
+    if (!amountPattern.test(line)) {
+      continue;
+    }
+    const score = (strongLabelPattern.test(line) ? 10 : 0) + Math.min(index / 1000, 1);
+    scored.push({ line, score });
+  }
+
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .map((item) => item.line)
+    .filter((line, index, all) => all.indexOf(line) === index)
+    .slice(0, limit);
+}
+
+export function summarizeDriveFileAmount({ file, amountCandidates = [], text = '' }) {
+  const lines = [
+    `${file.name} を確認しました。`,
+    file.webViewLink || ''
+  ].filter(Boolean);
+
+  if (amountCandidates.length) {
+    lines.push('', '金額候補:');
+    for (const candidate of amountCandidates) {
+      lines.push(`- ${candidate}`);
+    }
+    lines.push('', 'PDF本文から拾った候補なので、送信前に原本で最終確認してください。');
+    return lines.join('\n');
+  }
+
+  if (text.trim()) {
+    lines.push('', 'PDFは読めましたが、金額らしい行を特定できませんでした。Total / Amount / 合計の表記が崩れている可能性があります。');
+    return lines.join('\n');
+  }
+
+  lines.push('', 'PDF本文を読み取れませんでした。スキャン画像PDFの場合はOCR対応が必要です。');
+  return lines.join('\n');
+}
+
 export function summarizeDriveFiles(files) {
   if (!files.length) {
     return 'Google Driveで該当ファイルは見つかりませんでした。';
@@ -272,6 +393,12 @@ function getDriveSearchTerms(query) {
     .map((term) => term.trim())
     .filter(Boolean)
     .slice(0, 5);
+}
+
+function normalizeDriveReference(value) {
+  return String(value || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
 }
 
 function escapeDriveQuery(value) {
