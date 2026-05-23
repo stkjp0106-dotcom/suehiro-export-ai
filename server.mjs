@@ -2,6 +2,11 @@ import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { loadDotEnv } from './src/env.mjs';
+import {
+  deleteGmailDraftsForJstDate,
+  getGmailAccessToken,
+  getTodayJstDate
+} from './src/gmail.mjs';
 import { handleLineWebhook } from './src/line.mjs';
 import { createSuehiroReply } from './src/openai.mjs';
 import { loadKnowledgeContext } from './src/knowledge.mjs';
@@ -174,6 +179,10 @@ const server = createServer(async (request, response) => {
           return 'テキストで送ってください。';
         }
 
+        if (isDeleteTodayDraftsCommand(userText)) {
+          return deleteTodayGmailDraftsFromLine(config.google);
+        }
+
         const lineDriveContext = loadLineDriveContext(config.lineDriveContextPath);
         if (isDriveFileDetailRequest(userText, lineDriveContext)) {
           return answerDriveFileDetail(userText, config.google, lineDriveContext);
@@ -231,6 +240,41 @@ async function buildKnowledgeContext(userText, googleConfig) {
   }
 
   return chunks.filter(Boolean).join('\n\n');
+}
+
+function isDeleteTodayDraftsCommand(text) {
+  const value = String(text || '').replace(/\s+/g, '');
+  return /今日.*下書き.*(?:全部|すべて|全て)?.*(?:削除|消して|消す|delete)/i.test(value);
+}
+
+async function deleteTodayGmailDraftsFromLine(googleConfig) {
+  if (!hasGoogleConfig(googleConfig)) {
+    return 'Gmail下書き削除のGoogle設定が未完了です。GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REFRESH_TOKEN を確認してください。';
+  }
+
+  try {
+    const accessToken = await getGmailAccessToken(googleConfig);
+    const jstDate = getTodayJstDate();
+    const result = await deleteGmailDraftsForJstDate(jstDate, accessToken);
+
+    if (!result.deletedCount) {
+      return `今日（${jstDate} JST）作成のGmail下書きは見つかりませんでした。確認した下書き数: ${result.scannedCount}`;
+    }
+
+    return [
+      `今日（${jstDate} JST）作成のGmail下書きを削除しました。`,
+      `削除数: ${result.deletedCount}`,
+      '',
+      ...result.deletedDrafts.slice(0, 10).map((draft, index) => [
+        `${index + 1}. ${draft.subject}`,
+        draft.to ? `To: ${draft.to}` : ''
+      ].filter(Boolean).join('\n')),
+      ...(result.deletedDrafts.length > 10 ? [`ほか ${result.deletedDrafts.length - 10} 件`] : [])
+    ].join('\n');
+  } catch (error) {
+    console.error(`Delete today Gmail drafts failed: ${error.stack || error.message}`);
+    return `今日作成のGmail下書き削除でエラーが出ました: ${error.message}`;
+  }
 }
 
 async function answerDriveLookup(userText, googleConfig, contextPath) {

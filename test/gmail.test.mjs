@@ -10,9 +10,13 @@ import {
   createGmailOutboundDraft,
   createGmailReplyDraft,
   deleteGmailDraft,
+  deleteGmailDraftsForJstDate,
   findGmailLabelId,
   getGmailAccessToken,
+  getTodayJstDate,
   GMAIL_SCOPES,
+  getGmailDraft,
+  listGmailDrafts,
   listGmailHistory,
   normalizeGmailMessage,
   sendGmailDraft
@@ -233,6 +237,93 @@ test('deleteGmailDraft calls Gmail drafts delete endpoint', async () => {
   });
 
   assert.equal(result, null);
+});
+
+test('listGmailDrafts follows draft pages', async () => {
+  const calls = [];
+  const drafts = await listGmailDrafts('gmail-token', {
+    fetchImpl: async (url) => {
+      calls.push(String(url));
+      if (!String(url).includes('pageToken=next')) {
+        return {
+          ok: true,
+          json: async () => ({ drafts: [{ id: 'draft-1' }], nextPageToken: 'next' })
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({ drafts: [{ id: 'draft-2' }] })
+      };
+    }
+  });
+
+  assert.deepEqual(drafts.map((draft) => draft.id), ['draft-1', 'draft-2']);
+  assert.equal(calls.length, 2);
+});
+
+test('getGmailDraft asks for draft metadata', async () => {
+  const draft = await getGmailDraft('draft-id', 'gmail-token', async (url, options) => {
+    assert.match(String(url), /\/gmail\/v1\/users\/me\/drafts\/draft-id/);
+    assert.match(String(url), /format=metadata/);
+    assert.equal(options.headers.Authorization, 'Bearer gmail-token');
+    return { ok: true, json: async () => ({ id: 'draft-id' }) };
+  });
+
+  assert.equal(draft.id, 'draft-id');
+});
+
+test('deleteGmailDraftsForJstDate deletes only matching JST date drafts', async () => {
+  const calls = [];
+  const result = await deleteGmailDraftsForJstDate('2026-05-23', 'gmail-token', {
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      if (String(url).endsWith('/drafts?maxResults=100')) {
+        return {
+          ok: true,
+          json: async () => ({ drafts: [{ id: 'today-draft' }, { id: 'old-draft' }] })
+        };
+      }
+      if (String(url).includes('/drafts/today-draft') && options.method !== 'DELETE') {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'today-draft',
+            message: {
+              id: 'message-1',
+              internalDate: String(Date.parse('2026-05-22T15:30:00.000Z')),
+              payload: { headers: [{ name: 'Subject', value: 'Today draft' }, { name: 'To', value: 'buyer@example.com' }] }
+            }
+          })
+        };
+      }
+      if (String(url).includes('/drafts/old-draft') && options.method !== 'DELETE') {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'old-draft',
+            message: {
+              id: 'message-2',
+              internalDate: String(Date.parse('2026-05-21T15:30:00.000Z')),
+              payload: { headers: [{ name: 'Subject', value: 'Old draft' }] }
+            }
+          })
+        };
+      }
+      if (String(url).endsWith('/drafts/today-draft') && options.method === 'DELETE') {
+        return { ok: true, status: 204, json: async () => ({}) };
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    }
+  });
+
+  assert.equal(result.deletedCount, 1);
+  assert.equal(result.deletedDrafts[0].subject, 'Today draft');
+  assert(calls.some((call) => call.url.endsWith('/drafts/today-draft') && call.options.method === 'DELETE'));
+  assert(!calls.some((call) => call.url.endsWith('/drafts/old-draft') && call.options.method === 'DELETE'));
+});
+
+test('getTodayJstDate formats the current date in Japan time', () => {
+  assert.equal(getTodayJstDate(new Date('2026-05-22T15:01:00.000Z')), '2026-05-23');
 });
 
 test('buildOutboundMime encodes non-ascii subjects', () => {

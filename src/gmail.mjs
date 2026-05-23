@@ -1,6 +1,7 @@
 import { DRIVE_READONLY_SCOPE, getValidAccessToken } from './google-drive.mjs';
 
 const GMAIL_BASE_URL = 'https://gmail.googleapis.com/gmail/v1/users/me';
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const SUEHIRO_EMAIL_SIGNATURE_LINES = [
   'ststststststststststststststststststststststststststststst',
   'Takumi Sato -佐藤 拓海-',
@@ -141,6 +142,68 @@ export async function deleteGmailDraft(draftId, accessToken, fetchImpl = fetch) 
   });
 }
 
+export async function listGmailDrafts(accessToken, options = {}) {
+  const drafts = [];
+  let pageToken = '';
+  do {
+    const url = new URL(`${GMAIL_BASE_URL}/drafts`);
+    url.searchParams.set('maxResults', String(options.maxResults || 100));
+    if (pageToken) {
+      url.searchParams.set('pageToken', pageToken);
+    }
+    const data = await gmailRequest(url.toString(), accessToken, {
+      fetchImpl: options.fetchImpl
+    });
+    drafts.push(...(data.drafts || []));
+    pageToken = data.nextPageToken || '';
+  } while (pageToken);
+  return drafts;
+}
+
+export async function getGmailDraft(draftId, accessToken, fetchImpl = fetch) {
+  const url = new URL(`${GMAIL_BASE_URL}/drafts/${encodeURIComponent(draftId)}`);
+  url.searchParams.set('format', 'metadata');
+  url.searchParams.append('metadataHeaders', 'Subject');
+  url.searchParams.append('metadataHeaders', 'To');
+  return gmailRequest(url.toString(), accessToken, { fetchImpl });
+}
+
+export async function deleteGmailDraftsForJstDate(jstDate, accessToken, options = {}) {
+  const drafts = await listGmailDrafts(accessToken, options);
+  const targets = [];
+
+  for (const draft of drafts) {
+    if (!draft.id) {
+      continue;
+    }
+    const detail = await getGmailDraft(draft.id, accessToken, options.fetchImpl);
+    const message = detail.message || {};
+    if (getJstDateString(message.internalDate) === jstDate) {
+      const headers = getHeaderMap(message.payload?.headers || []);
+      targets.push({
+        id: detail.id || draft.id,
+        messageId: message.id || '',
+        subject: headers.subject || '(no subject)',
+        to: headers.to || ''
+      });
+    }
+  }
+
+  for (const target of targets) {
+    await deleteGmailDraft(target.id, accessToken, options.fetchImpl);
+  }
+
+  return {
+    scannedCount: drafts.length,
+    deletedCount: targets.length,
+    deletedDrafts: targets
+  };
+}
+
+export function getTodayJstDate(now = new Date()) {
+  return getJstDateString(now.getTime());
+}
+
 export async function findGmailLabelId(labelName, accessToken, fetchImpl = fetch) {
   const data = await gmailRequest('/labels', accessToken, { fetchImpl });
   const label = (data.labels || []).find((item) => item.name === labelName);
@@ -258,6 +321,15 @@ function getHeaderMap(headers) {
     }
   }
   return map;
+}
+
+function getJstDateString(value) {
+  const ms = Number(value || 0);
+  if (!Number.isFinite(ms) || !ms) {
+    return '';
+  }
+  const jst = new Date(ms + JST_OFFSET_MS);
+  return `${jst.getUTCFullYear()}-${String(jst.getUTCMonth() + 1).padStart(2, '0')}-${String(jst.getUTCDate()).padStart(2, '0')}`;
 }
 
 function extractMessageText(payload) {
