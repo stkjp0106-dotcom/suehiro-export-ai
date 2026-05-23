@@ -13,7 +13,8 @@ import {
   getGmailAccessToken,
   GMAIL_SCOPES,
   listGmailHistory,
-  normalizeGmailMessage
+  normalizeGmailMessage,
+  sendGmailDraft
 } from '../src/gmail.mjs';
 import {
   buildGmailLineReport,
@@ -210,6 +211,17 @@ test('createGmailOutboundDraft creates a new cold outreach draft', async () => {
   );
 
   assert.equal(draft.id, 'outbound-draft-id');
+});
+
+test('sendGmailDraft calls Gmail drafts send endpoint', async () => {
+  const message = await sendGmailDraft('draft-id', 'gmail-token', async (url, options) => {
+    assert.match(String(url), /\/gmail\/v1\/users\/me\/drafts\/send$/);
+    assert.equal(options.method, 'POST');
+    assert.deepEqual(JSON.parse(options.body), { id: 'draft-id' });
+    return { ok: true, json: async () => ({ id: 'sent-message-id' }) };
+  });
+
+  assert.equal(message.id, 'sent-message-id');
 });
 
 test('buildOutboundMime encodes non-ascii subjects', () => {

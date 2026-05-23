@@ -3,7 +3,8 @@ import { dirname, join } from 'node:path';
 import {
   buildGmailDraftHtml,
   createGmailOutboundDraft,
-  getGmailAccessToken
+  getGmailAccessToken,
+  sendGmailDraft
 } from './gmail.mjs';
 import { pushLineText } from './line.mjs';
 
@@ -174,6 +175,32 @@ export function parseProspectRunCommand(text) {
   );
 
   return mentionsTaskRun || mentionsProspectSearch || mentionsDraftCreation;
+}
+
+export function parseProspectSendDraftCommand(text) {
+  const value = compactText(text);
+  if (!value) {
+    return null;
+  }
+
+  const asksToSend = /送信|送って|send/i.test(value);
+  if (!asksToSend) {
+    return null;
+  }
+
+  if (/全部|全て|すべて|all/i.test(value)) {
+    return { action: 'send', selection: 'all', indices: [] };
+  }
+
+  const indices = [...value.matchAll(/\d+/g)]
+    .map((match) => Number(match[0]))
+    .filter((number) => Number.isInteger(number) && number > 0);
+
+  if (!indices.length) {
+    return null;
+  }
+
+  return { action: 'send', selection: 'indices', indices: [...new Set(indices)] };
 }
 
 export async function classifyProspectLineCommand(text, config, fetchImpl = fetch) {
@@ -381,10 +408,66 @@ export async function runProspectSearch(config, options = {}) {
     logger.info(`Prospect draft saved: company=${JSON.stringify(prospect.company)} draftId=${draft.id}`);
   }
 
+  state.pendingProspectDrafts = drafts.map(({ prospect, draftId }, index) => ({
+    index: index + 1,
+    draftId,
+    company: prospect.company,
+    country: prospect.country,
+    email: prospect.email,
+    website: prospect.website
+  }));
   state.lastRunAt = new Date().toISOString();
   (options.saveState || saveProspectState)(config.statePath, state);
   await notifyLineAboutProspectDrafts(drafts, config, options);
   return { drafts };
+}
+
+export async function sendProspectDraftsFromLine(command, config, options = {}) {
+  const state = (options.loadState || loadProspectState)(config.statePath);
+  const pendingDrafts = Array.isArray(state.pendingProspectDrafts) ? state.pendingProspectDrafts : [];
+  if (!pendingDrafts.length) {
+    return '送信待ちの営業メール下書きが見つかりません。先に候補検索を実行してください。';
+  }
+
+  const targets = command.selection === 'all'
+    ? pendingDrafts
+    : pendingDrafts.filter((draft) => command.indices.includes(Number(draft.index)));
+
+  if (!targets.length) {
+    return `指定された番号の下書きが見つかりません。送信できる番号: ${pendingDrafts.map((draft) => draft.index).join(', ')}`;
+  }
+
+  const accessToken = await getGmailAccessToken(config.google, options.fetchImpl);
+  const sent = [];
+  const failed = [];
+  for (const draft of targets) {
+    try {
+      await sendGmailDraft(draft.draftId, accessToken, options.fetchImpl);
+      sent.push(draft);
+    } catch (error) {
+      failed.push({ draft, error });
+    }
+  }
+
+  const sentIds = new Set(sent.map((draft) => draft.draftId));
+  state.pendingProspectDrafts = pendingDrafts.filter((draft) => !sentIds.has(draft.draftId));
+  (options.saveState || saveProspectState)(config.statePath, state);
+
+  const lines = [];
+  if (sent.length) {
+    lines.push('指定された営業メールを送信しました。', '');
+    for (const draft of sent) {
+      lines.push(`${draft.index}. ${draft.company} <${draft.email}>`);
+    }
+  }
+  if (failed.length) {
+    lines.push('', '送信できなかった下書き:');
+    for (const { draft, error } of failed) {
+      lines.push(`${draft.index}. ${draft.company}: ${error.message}`);
+    }
+  }
+
+  return lines.filter((line, index, all) => line !== '' || all[index - 1] !== '').join('\n').trim();
 }
 
 export async function discoverProspects(config, state = {}, fetchImpl = fetch) {
@@ -491,7 +574,7 @@ export function parseProspects(text) {
 
 export function loadProspectState(path = DEFAULT_STATE_PATH) {
   if (!existsSync(path)) {
-    return { lastRunAt: '', seenProspects: [], targetMarkets: '', targetProfile: '' };
+    return buildDefaultProspectState();
   }
 
   const data = JSON.parse(readFileSync(path, 'utf8'));
@@ -499,7 +582,8 @@ export function loadProspectState(path = DEFAULT_STATE_PATH) {
     lastRunAt: data.lastRunAt || '',
     seenProspects: Array.isArray(data.seenProspects) ? data.seenProspects : [],
     targetMarkets: data.targetMarkets || '',
-    targetProfile: data.targetProfile || ''
+    targetProfile: data.targetProfile || '',
+    pendingProspectDrafts: Array.isArray(data.pendingProspectDrafts) ? data.pendingProspectDrafts : []
   };
 }
 
@@ -515,6 +599,16 @@ function shouldRunProspectSearch(state, config) {
 
   const elapsedMs = Date.now() - new Date(state.lastRunAt).getTime();
   return elapsedMs >= config.intervalHours * 60 * 60 * 1000;
+}
+
+function buildDefaultProspectState() {
+  return {
+    lastRunAt: '',
+    seenProspects: [],
+    targetMarkets: '',
+    targetProfile: '',
+    pendingProspectDrafts: []
+  };
 }
 
 function normalizeProspect(item) {

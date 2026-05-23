@@ -125,6 +125,16 @@ export async function createGmailOutboundDraft({ to, subject, htmlBody }, access
   });
 }
 
+export async function sendGmailDraft(draftId, accessToken, fetchImpl = fetch) {
+  return gmailRequest('/drafts/send', accessToken, {
+    method: 'POST',
+    fetchImpl,
+    body: {
+      id: draftId
+    }
+  });
+}
+
 export async function findGmailLabelId(labelName, accessToken, fetchImpl = fetch) {
   const data = await gmailRequest('/labels', accessToken, { fetchImpl });
   const label = (data.labels || []).find((item) => item.name === labelName);

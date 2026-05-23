@@ -11,9 +11,11 @@ import {
   classifyProspectLineCommand,
   getProspectMonitorConfig,
   parseProspectRunCommand,
+  parseProspectSendDraftCommand,
   parseProspectTargetProfileCommand,
   parseProspectTargetMarketsCommand,
   runProspectSearch,
+  sendProspectDraftsFromLine,
   validateProspectMonitorConfig
 } from './src/prospect-monitor.mjs';
 import {
@@ -138,6 +140,11 @@ const server = createServer(async (request, response) => {
 
         if (parseProspectRunCommand(userText)) {
           return startProspectSearchFromLine(config.prospect);
+        }
+
+        const prospectSendDraftCommand = parseProspectSendDraftCommand(userText);
+        if (prospectSendDraftCommand) {
+          return sendProspectDraftsFromLine(prospectSendDraftCommand, config.prospect);
         }
 
         if (config.openaiApiKey) {

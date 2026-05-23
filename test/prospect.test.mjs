@@ -11,11 +11,13 @@ import {
   getEffectiveProspectTargetMarkets,
   getProspectMonitorConfig,
   parseProspectRunCommand,
+  parseProspectSendDraftCommand,
   parseProspectLineCommandClassification,
   parseProspectTargetProfileCommand,
   parseProspectTargetMarketsCommand,
   parseProspects,
   runProspectSearch,
+  sendProspectDraftsFromLine,
   validateProspectMonitorConfig
 } from '../src/prospect-monitor.mjs';
 
@@ -121,6 +123,25 @@ test('parseProspectRunCommand handles natural LINE run requests', () => {
   assert.equal(parseProspectRunCommand('探して'), true);
   assert.equal(parseProspectRunCommand('prospects now'), true);
   assert.equal(parseProspectRunCommand('香港向けの牛タンについて教えて'), false);
+});
+
+test('parseProspectSendDraftCommand handles LINE send approval phrases', () => {
+  assert.deepEqual(parseProspectSendDraftCommand('2だけ送信'), {
+    action: 'send',
+    selection: 'indices',
+    indices: [2]
+  });
+  assert.deepEqual(parseProspectSendDraftCommand('1と3送って'), {
+    action: 'send',
+    selection: 'indices',
+    indices: [1, 3]
+  });
+  assert.deepEqual(parseProspectSendDraftCommand('全部送信'), {
+    action: 'send',
+    selection: 'all',
+    indices: []
+  });
+  assert.equal(parseProspectSendDraftCommand('2だけ確認'), null);
 });
 
 test('parseProspectLineCommandClassification handles natural command JSON', () => {
@@ -346,6 +367,107 @@ test('runProspectSearch creates drafts and reports to LINE', async () => {
   assert.equal(result.drafts.length, 1);
   assert(calls.some((call) => call.url.endsWith('/drafts')));
   assert(calls.some((call) => call.url === 'https://api.line.me/v2/bot/message/push'));
+});
+
+test('runProspectSearch saves pending drafts for later LINE approval', async () => {
+  let savedState = null;
+  const config = getProspectMonitorConfig({
+    OPENAI_API_KEY: 'openai-key',
+    OPENAI_MODEL: 'test-model',
+    GOOGLE_CLIENT_ID: 'client-id',
+    GOOGLE_CLIENT_SECRET: 'client-secret',
+    GOOGLE_REFRESH_TOKEN: 'refresh-token',
+    LINE_CHANNEL_ACCESS_TOKEN: 'line-token',
+    LINE_REPORT_TO_ID: 'line-user-id',
+    PROSPECT_MAX_PROSPECTS: '1'
+  });
+
+  await runProspectSearch(config, {
+    logger: { info() {}, error() {} },
+    loadState: () => ({ lastRunAt: '', seenProspects: [] }),
+    saveState: (_path, nextState) => {
+      savedState = nextState;
+    },
+    fetchImpl: async (url, options = {}) => {
+      if (String(url).includes('oauth2.googleapis.com')) {
+        return { ok: true, json: async () => ({ access_token: 'gmail-token' }) };
+      }
+      if (String(url).includes('api.openai.com')) {
+        return {
+          ok: true,
+          json: async () => ({
+            output_text: JSON.stringify({
+              prospects: [
+                {
+                  company: 'Importer Co',
+                  country: 'Hong Kong',
+                  website: 'https://importer.example',
+                  email: 'buyer@importer.example',
+                  contact_url: 'https://importer.example/contact',
+                  evidence: 'Imports premium meat.',
+                  source_urls: ['https://importer.example'],
+                  draft_subject: 'Japanese wagyu export inquiry',
+                  draft_body: 'Hello, we export Japanese wagyu.'
+                }
+              ]
+            })
+          })
+        };
+      }
+      if (String(url).endsWith('/drafts')) {
+        return { ok: true, json: async () => ({ id: 'draft-id' }) };
+      }
+      if (String(url).includes('api.line.me')) {
+        return { ok: true };
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    }
+  });
+
+  assert.equal(savedState.pendingProspectDrafts[0].index, 1);
+  assert.equal(savedState.pendingProspectDrafts[0].draftId, 'draft-id');
+  assert.equal(savedState.pendingProspectDrafts[0].email, 'buyer@importer.example');
+});
+
+test('sendProspectDraftsFromLine sends selected pending Gmail draft', async () => {
+  const calls = [];
+  let savedState = null;
+  const config = getProspectMonitorConfig({
+    GOOGLE_CLIENT_ID: 'client-id',
+    GOOGLE_CLIENT_SECRET: 'client-secret',
+    GOOGLE_REFRESH_TOKEN: 'refresh-token'
+  });
+
+  const reply = await sendProspectDraftsFromLine(
+    { action: 'send', selection: 'indices', indices: [2] },
+    config,
+    {
+      loadState: () => ({
+        pendingProspectDrafts: [
+          { index: 1, draftId: 'draft-1', company: 'First Co', email: 'first@example.com' },
+          { index: 2, draftId: 'draft-2', company: 'Second Co', email: 'second@example.com' }
+        ]
+      }),
+      saveState: (_path, nextState) => {
+        savedState = nextState;
+      },
+      fetchImpl: async (url, options = {}) => {
+        calls.push({ url: String(url), options });
+        if (String(url).includes('oauth2.googleapis.com')) {
+          return { ok: true, json: async () => ({ access_token: 'gmail-token' }) };
+        }
+        if (String(url).endsWith('/drafts/send')) {
+          assert.deepEqual(JSON.parse(options.body), { id: 'draft-2' });
+          return { ok: true, json: async () => ({ id: 'sent-message-id' }) };
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      }
+    }
+  );
+
+  assert.match(reply, /Second Co/);
+  assert(calls.some((call) => call.url.endsWith('/drafts/send')));
+  assert.deepEqual(savedState.pendingProspectDrafts.map((draft) => draft.draftId), ['draft-1']);
 });
 
 test('buildProspectLineReport asks for human review before sending', () => {
