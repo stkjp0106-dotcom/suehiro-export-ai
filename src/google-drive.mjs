@@ -11,10 +11,19 @@ const PACKING_LIST_PATTERN = /(?:^|[^A-Z0-9])P\s*\/?\s*L(?:\d|[^A-Z0-9]|$)|packi
 const DEFAULT_TOKEN_PATH = '.tokens/google-drive.json';
 
 export function getGoogleConfig(env = process.env) {
+  const publicBaseUrl = (env.PUBLIC_BASE_URL || env.RAILWAY_PUBLIC_DOMAIN || '').replace(/\/+$/, '');
+  const publicRedirectUri = publicBaseUrl
+    ? `${publicBaseUrl.startsWith('http') ? publicBaseUrl : `https://${publicBaseUrl}`}/google/oauth2callback`
+    : '';
+  const configuredRedirectUri = env.GOOGLE_REDIRECT_URI || '';
+  const redirectUri = publicRedirectUri && /^http:\/\/localhost(?::\d+)?\/google\/oauth2callback$/i.test(configuredRedirectUri)
+    ? publicRedirectUri
+    : configuredRedirectUri || publicRedirectUri || 'http://localhost:3000/google/oauth2callback';
+
   return {
     clientId: env.GOOGLE_CLIENT_ID,
     clientSecret: env.GOOGLE_CLIENT_SECRET,
-    redirectUri: env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/google/oauth2callback',
+    redirectUri,
     tokenPath: env.GOOGLE_TOKEN_PATH || DEFAULT_TOKEN_PATH,
     refreshToken: env.GOOGLE_REFRESH_TOKEN
   };

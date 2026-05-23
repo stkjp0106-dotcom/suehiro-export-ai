@@ -11,6 +11,7 @@ import {
   filterDriveDocumentFiles,
   findDriveContextFile,
   findDriveInvoiceFiles,
+  getGoogleConfig,
   isDriveDocumentLookupRequest,
   isDriveFileDetailRequest,
   isGoogleAuthExpiredError,
@@ -39,6 +40,20 @@ test('buildGoogleAuthUrl creates a Drive readonly consent URL', () => {
   assert.equal(url.searchParams.get('redirect_uri'), 'http://localhost:3000/google/oauth2callback');
   assert.equal(url.searchParams.get('access_type'), 'offline');
   assert.match(url.searchParams.get('scope'), /drive\.readonly/);
+});
+
+test('getGoogleConfig prefers public Railway callback over localhost redirect', () => {
+  const config = getGoogleConfig({
+    GOOGLE_CLIENT_ID: 'client-id',
+    GOOGLE_CLIENT_SECRET: 'client-secret',
+    GOOGLE_REDIRECT_URI: 'http://localhost:3000/google/oauth2callback',
+    RAILWAY_PUBLIC_DOMAIN: 'suehiro-export-ai-production.up.railway.app'
+  });
+
+  assert.equal(
+    config.redirectUri,
+    'https://suehiro-export-ai-production.up.railway.app/google/oauth2callback'
+  );
 });
 
 test('isGoogleAuthExpiredError detects expired refresh token failures', () => {
