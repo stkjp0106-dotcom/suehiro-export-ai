@@ -202,8 +202,6 @@ export function buildGmailReplyDraftInput(message) {
 
 export function buildGmailDraftHtml(replyText, signatureHtml = '') {
   return [
-    '<p><strong>AI返信案です。送信前に必ず内容を確認してください。</strong></p>',
-    '<hr>',
     textToHtml(replyText),
     '<br>',
     signatureHtml || buildSuehiroEmailSignatureHtml()

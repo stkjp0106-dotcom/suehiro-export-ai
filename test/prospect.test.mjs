@@ -136,12 +136,21 @@ test('parseProspectSendDraftCommand handles LINE send approval phrases', () => {
     selection: 'indices',
     indices: [1, 3]
   });
+  assert.deepEqual(parseProspectSendDraftCommand('2番の営業メール送って'), {
+    action: 'send',
+    selection: 'indices',
+    indices: [2]
+  });
   assert.deepEqual(parseProspectSendDraftCommand('全部送信'), {
     action: 'send',
     selection: 'all',
     indices: []
   });
   assert.equal(parseProspectSendDraftCommand('2だけ確認'), null);
+  assert.equal(
+    parseProspectSendDraftCommand('1番上のAI返信案です、、、のところこれから消して、そのまま送信しても問題ない形にして'),
+    null
+  );
 });
 
 test('parseProspectLineCommandClassification handles natural command JSON', () => {

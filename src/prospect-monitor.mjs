@@ -183,16 +183,25 @@ export function parseProspectSendDraftCommand(text) {
     return null;
   }
 
-  const asksToSend = /送信|送って|send/i.test(value);
-  if (!asksToSend) {
+  if (/AI\s*返信案|返信案|返信メール|受信メール|問い合わせ/i.test(value)) {
     return null;
   }
 
-  if (/全部|全て|すべて|all/i.test(value)) {
+  const commandText = value
+    .replace(/\s+/g, '')
+    .replace(/営業メール|営業候補|候補メール|下書き|ドラフト|draft/gi, '')
+    .replace(/の/g, '');
+
+  if (/^(?:全部|全て|すべて|all)(?:だけ|を)?(?:送信|送って|送ってください|send)$/i.test(commandText)) {
     return { action: 'send', selection: 'all', indices: [] };
   }
 
-  const indices = [...value.matchAll(/\d+/g)]
+  const numberedCommand = commandText.match(/^((?:\d+番?(?:だけ)?(?:と|、|,|・|&)?)+)(?:だけ|を)?(?:送信|送って|送ってください|send)$/i);
+  if (!numberedCommand) {
+    return null;
+  }
+
+  const indices = [...numberedCommand[1].matchAll(/\d+/g)]
     .map((match) => Number(match[0]))
     .filter((number) => Number.isInteger(number) && number > 0);
 

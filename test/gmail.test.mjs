@@ -328,7 +328,8 @@ test('buildGmailReplyDraftInput and buildGmailDraftHtml format content', () => {
 
   assert.match(input, /Incoming email/);
   assert.match(input, /Buyer/);
-  assert.match(html, /AI返信案/);
+  assert.doesNotMatch(html, /AI返信案/);
+  assert.doesNotMatch(html, /送信前に必ず内容を確認/);
   assert.match(html, /<br>/);
   assert.match(html, /ststststststststststststststststststststststststststststst/);
   assert.match(html, /Takumi Sato -佐藤 拓海-/);
