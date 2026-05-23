@@ -1,14 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildDriveDocumentLookupQuery,
   buildDriveLookupQuery,
   buildGoogleAuthUrl,
   downloadDriveFile,
   exchangeCodeForTokens,
   extractAmountCandidates,
   extractDriveReference,
+  filterDriveDocumentFiles,
   findDriveContextFile,
   findDriveInvoiceFiles,
+  isDriveDocumentLookupRequest,
   isDriveFileDetailRequest,
   isDriveInvoiceLookupRequest,
   isDriveLookupRequest,
@@ -16,6 +19,7 @@ import {
   refreshAccessToken,
   searchDriveFolders,
   searchDriveFiles,
+  summarizeDriveDocumentFiles,
   summarizeDriveInvoiceFiles,
   summarizeDriveLookup,
   summarizeDriveFiles
@@ -208,6 +212,41 @@ test('Drive invoice lookup helpers filter recent invoice files from context', ()
   assert.match(summary, /請求書\/Invoice候補/);
   assert.match(summary, /CAN015 INV\.pdf/);
   assert.match(summary, /\[INV011\(0510\)\]/);
+});
+
+test('Drive document lookup helpers handle PL requests directly', () => {
+  const files = [
+    {
+      id: 'inv',
+      name: '[Golden Fine Food INV011(0510).pdf]',
+      mimeType: 'application/pdf',
+      webViewLink: 'https://drive.google.com/file/d/inv',
+      modifiedTime: '2026-05-23T00:00:00Z'
+    },
+    {
+      id: 'pl',
+      name: '[Golden Fine Food PL011(0510).pdf]',
+      mimeType: 'application/pdf',
+      webViewLink: 'https://drive.google.com/file/d/pl',
+      modifiedTime: '2026-05-22T00:00:00Z'
+    }
+  ];
+
+  assert.equal(isDriveDocumentLookupRequest('Golden fine foodsの前回のPLだして'), true);
+  assert.equal(isDriveDocumentLookupRequest('PL'), false);
+  assert.equal(buildDriveDocumentLookupQuery('Golden fine foodsの前回のPLだして'), 'Golden fine foods PL Packing List');
+
+  const selected = filterDriveDocumentFiles('Golden fine foodsの前回のPLだして', files);
+  assert.deepEqual(selected.map((file) => file.id), ['pl']);
+
+  const summary = summarizeDriveDocumentFiles({
+    requestText: 'Golden fine foodsの前回のPLだして',
+    query: 'Golden fine foods PL Packing List',
+    files: selected
+  });
+  assert.match(summary, /PL \/ Packing List候補/);
+  assert.match(summary, /Golden Fine Food PL011/);
+  assert.doesNotMatch(summary, /接続されていません/);
 });
 
 test('extractAmountCandidates prefers total amount lines', () => {

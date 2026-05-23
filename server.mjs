@@ -20,6 +20,7 @@ import {
 } from './src/prospect-monitor.mjs';
 import {
   buildGoogleAuthUrl,
+  buildDriveDocumentLookupQuery,
   downloadDriveFile,
   DRIVE_FOLDER_MIME_TYPE,
   extractAmountCandidates,
@@ -32,7 +33,9 @@ import {
   getValidAccessToken,
   getGoogleConfig,
   hasGoogleConfig,
+  filterDriveDocumentFiles,
   isDriveFileDetailRequest,
+  isDriveDocumentLookupRequest,
   isDriveInvoiceLookupRequest,
   isDriveLookupRequest,
   listDriveFolderChildren,
@@ -40,6 +43,7 @@ import {
   saveGoogleTokens,
   searchDriveFolders,
   searchDriveFiles,
+  summarizeDriveDocumentFiles,
   summarizeDriveFileAmount,
   summarizeDriveInvoiceFiles,
   summarizeDriveLookup,
@@ -179,6 +183,10 @@ const server = createServer(async (request, response) => {
           return summarizeDriveInvoiceFiles(findDriveInvoiceFiles(userText, lineDriveContext.files || []));
         }
 
+        if (isDriveDocumentLookupRequest(userText)) {
+          return answerDriveDocumentLookup(userText, config.google, config.lineDriveContextPath);
+        }
+
         if (isDriveLookupRequest(userText)) {
           return answerDriveLookup(userText, config.google, config.lineDriveContextPath);
         }
@@ -265,6 +273,39 @@ async function answerDriveLookup(userText, googleConfig, contextPath) {
       ].join('\n');
     }
     return `Google Drive検索でエラーが出ました: ${error.message}`;
+  }
+}
+
+async function answerDriveDocumentLookup(userText, googleConfig, contextPath) {
+  if (!hasGoogleConfig(googleConfig)) {
+    return 'Google Drive検索の設定が未完了です。GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI を確認してください。';
+  }
+
+  const query = buildDriveDocumentLookupQuery(userText);
+  if (!query) {
+    return '探したい書類名か会社名をもう少し具体的に送ってください。';
+  }
+
+  try {
+    const accessToken = await getValidAccessToken(googleConfig);
+    if (!accessToken) {
+      return 'Google Driveの認可がまだ完了していません。/google/auth で認可してください。';
+    }
+
+    const files = await searchDriveFiles(query, accessToken);
+    const selectedFiles = filterDriveDocumentFiles(userText, files);
+    saveLineDriveContext(contextPath, buildLineDriveContext(query, [], [], selectedFiles.length ? selectedFiles : files));
+    return summarizeDriveDocumentFiles({
+      requestText: userText,
+      query,
+      files: selectedFiles
+    });
+  } catch (error) {
+    console.error(error);
+    if (isGoogleDriveScopeError(error)) {
+      return 'Google Driveを見る権限が今のGoogle認可トークンに入っていません。Drive閲覧権限つきで再認可してください。';
+    }
+    return `Google Drive書類検索でエラーが出ました: ${error.message}`;
   }
 }
 

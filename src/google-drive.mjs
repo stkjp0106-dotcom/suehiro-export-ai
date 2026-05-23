@@ -7,6 +7,7 @@ const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files';
 export const DRIVE_READONLY_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
 export const DRIVE_FOLDER_MIME_TYPE = 'application/vnd.google-apps.folder';
 export const DRIVE_PDF_MIME_TYPE = 'application/pdf';
+const PACKING_LIST_PATTERN = /(?:^|[^A-Z0-9])P\s*\/?\s*L(?:\d|[^A-Z0-9]|$)|packing\s*list|パッキングリスト/i;
 const DEFAULT_TOKEN_PATH = '.tokens/google-drive.json';
 
 export function getGoogleConfig(env = process.env) {
@@ -293,6 +294,64 @@ export function summarizeDriveInvoiceFiles(files) {
     ].filter(Boolean).join('\n')),
     '',
     '金額を読みたい場合は「CAN015の金額」のようにファイル番号を入れて送ってください。'
+  ].join('\n');
+}
+
+export function isDriveDocumentLookupRequest(text) {
+  const value = String(text || '').trim();
+  if (!value) {
+    return false;
+  }
+
+  const mentionsDocumentType = PACKING_LIST_PATTERN.test(value);
+  const asksForFile = /前回|直近|最新|取引|出して|見せて|提示|探して|検索|ファイル|pdf|PDF|document|docs/i.test(value);
+  return mentionsDocumentType && asksForFile;
+}
+
+export function buildDriveDocumentLookupQuery(text) {
+  return String(text || '')
+    .replace(/(?:^|[^A-Z0-9])P\s*\/?\s*L(?:\d|[^A-Z0-9]|$)|packing\s*list|パッキングリスト/gi, ' PL Packing List ')
+    .replace(/前回|直近|最新|取引|出して|見せて|提示|探して|検索|ファイル|pdf|PDF|document|docs|の|を|だして|して|ください|お願い/gi, ' ')
+    .replace(/[。、，,：:（）()[\]{}「」]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function filterDriveDocumentFiles(text, files = [], limit = 5) {
+  const value = String(text || '');
+  const wantsPackingList = PACKING_LIST_PATTERN.test(value);
+  const documentPattern = wantsPackingList
+    ? PACKING_LIST_PATTERN
+    : /./;
+
+  const typedFiles = files
+    .filter((file) => documentPattern.test(String(file.name || '')))
+    .sort(compareDriveFilesByDateDesc);
+
+  if (typedFiles.length) {
+    return typedFiles.slice(0, limit);
+  }
+
+  return [...files].sort(compareDriveFilesByDateDesc).slice(0, limit);
+}
+
+export function summarizeDriveDocumentFiles({ requestText, query, files = [] }) {
+  const wantsPackingList = PACKING_LIST_PATTERN.test(requestText);
+  const label = wantsPackingList ? 'PL / Packing List' : '該当書類';
+
+  if (!files.length) {
+    return `Google Driveで「${query}」に関連する${label}候補は見つかりませんでした。`;
+  }
+
+  return [
+    `Google Driveで「${query}」に関連する${label}候補を出しました。`,
+    '',
+    ...files.map((file, index) => [
+      `${index + 1}. ${file.name}`,
+      file.webViewLink || ''
+    ].filter(Boolean).join('\n')),
+    '',
+    '必要なら「1の金額」「このPDF読んで」のように続けてください。'
   ].join('\n');
 }
 
