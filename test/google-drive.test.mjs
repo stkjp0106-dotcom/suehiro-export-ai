@@ -8,12 +8,15 @@ import {
   extractAmountCandidates,
   extractDriveReference,
   findDriveContextFile,
+  findDriveInvoiceFiles,
   isDriveFileDetailRequest,
+  isDriveInvoiceLookupRequest,
   isDriveLookupRequest,
   listDriveFolderChildren,
   refreshAccessToken,
   searchDriveFolders,
   searchDriveFiles,
+  summarizeDriveInvoiceFiles,
   summarizeDriveLookup,
   summarizeDriveFiles
 } from '../src/google-drive.mjs';
@@ -165,6 +168,46 @@ test('Drive detail helpers understand follow-up invoice amount questions', () =>
   assert.equal(isDriveFileDetailRequest('014は？', context), true);
   assert.equal(extractDriveReference('CAN015の金額だね'), 'CAN015');
   assert.equal(findDriveContextFile('014は？', context.files).id, 'can014');
+});
+
+test('Drive invoice lookup helpers filter recent invoice files from context', () => {
+  const context = {
+    files: [
+      {
+        id: 'sheet',
+        name: 'Golden Fine Food スプレッドシート',
+        mimeType: 'application/vnd.google-apps.spreadsheet',
+        webViewLink: 'https://docs.google.com/spreadsheets/d/sheet',
+        modifiedTime: '2026-05-20T00:00:00Z'
+      },
+      {
+        id: 'inv011',
+        name: '[INV011(0510)]',
+        mimeType: 'application/pdf',
+        webViewLink: 'https://drive.google.com/file/d/inv011',
+        modifiedTime: '2026-05-21T00:00:00Z'
+      },
+      {
+        id: 'can015',
+        name: 'CAN015 INV.pdf',
+        mimeType: 'application/pdf',
+        webViewLink: 'https://drive.google.com/file/d/can015',
+        modifiedTime: '2026-05-23T00:00:00Z'
+      }
+    ]
+  };
+
+  assert.equal(isDriveInvoiceLookupRequest('直近の取引INVだけして', context), true);
+  assert.equal(isDriveInvoiceLookupRequest('請求書だよ', context), true);
+  assert.equal(isDriveInvoiceLookupRequest('こんにちは', context), false);
+
+  const invoiceFiles = findDriveInvoiceFiles('直近の取引INVだけして', context.files);
+  assert.deepEqual(invoiceFiles.map((file) => file.id), ['can015', 'inv011']);
+
+  const summary = summarizeDriveInvoiceFiles(invoiceFiles);
+  assert.match(summary, /請求書\/Invoice候補/);
+  assert.match(summary, /CAN015 INV\.pdf/);
+  assert.match(summary, /\[INV011\(0510\)\]/);
 });
 
 test('extractAmountCandidates prefers total amount lines', () => {

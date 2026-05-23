@@ -247,6 +247,55 @@ export function isDriveFileDetailRequest(text, context = null) {
   return hasRecentFiles && /^[A-Z]*\s*\d{2,5}\s*(?:は|って|かな)?\s*(?:？|\?)?$/i.test(value);
 }
 
+export function isDriveInvoiceLookupRequest(text, context = null) {
+  const value = String(text || '').trim();
+  if (!value || !Array.isArray(context?.files) || !context.files.length) {
+    return false;
+  }
+
+  const mentionsInvoice = /invoice|inv[\s\-_()]*\d*|請求書|インボイス|送り状/i.test(value);
+  const asksDriveLike = /直近|取引|だけ|出して|見せて|提示|どれ|どこ|ファイル|pdf|PDF|document|docs/i.test(value);
+  return mentionsInvoice && (asksDriveLike || value.length <= 12);
+}
+
+export function findDriveInvoiceFiles(text, files = [], limit = 5) {
+  const value = String(text || '');
+  const invoiceFiles = files
+    .filter((file) => /invoice|inv[\s\-_()]*\d*|請求書|インボイス/i.test(String(file.name || '')))
+    .sort(compareDriveFilesByDateDesc);
+
+  if (/直近|最新|last|recent/i.test(value)) {
+    return invoiceFiles.slice(0, limit);
+  }
+
+  const reference = extractDriveReference(value);
+  if (reference) {
+    const byReference = invoiceFiles.filter((file) => normalizeDriveReference(file.name || '').includes(reference));
+    if (byReference.length) {
+      return byReference.slice(0, limit);
+    }
+  }
+
+  return invoiceFiles.slice(0, limit);
+}
+
+export function summarizeDriveInvoiceFiles(files) {
+  if (!files.length) {
+    return '直前のDrive検索結果から、INV / Invoice / 請求書 に該当するファイルは見つかりませんでした。';
+  }
+
+  return [
+    '直前のDrive検索結果から、請求書/Invoice候補を出しました。',
+    '',
+    ...files.map((file, index) => [
+      `${index + 1}. ${file.name}`,
+      file.webViewLink || ''
+    ].filter(Boolean).join('\n')),
+    '',
+    '金額を読みたい場合は「CAN015の金額」のようにファイル番号を入れて送ってください。'
+  ].join('\n');
+}
+
 export function extractDriveReference(text) {
   const value = String(text || '').trim();
   const prefixed = value.match(/\b([A-Z]{2,}\s*[-_]?\s*\d{2,6})\b/i);
@@ -399,6 +448,12 @@ function normalizeDriveReference(value) {
   return String(value || '')
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, '');
+}
+
+function compareDriveFilesByDateDesc(left, right) {
+  const leftTime = new Date(left.modifiedTime || left.createdTime || 0).getTime() || 0;
+  const rightTime = new Date(right.modifiedTime || right.createdTime || 0).getTime() || 0;
+  return rightTime - leftTime;
 }
 
 function escapeDriveQuery(value) {

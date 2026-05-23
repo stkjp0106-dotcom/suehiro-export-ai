@@ -27,11 +27,13 @@ import {
   exchangeCodeForTokens,
   extractDriveReference,
   extractPdfText,
+  findDriveInvoiceFiles,
   findDriveContextFile,
   getValidAccessToken,
   getGoogleConfig,
   hasGoogleConfig,
   isDriveFileDetailRequest,
+  isDriveInvoiceLookupRequest,
   isDriveLookupRequest,
   listDriveFolderChildren,
   resolveTokenPath,
@@ -39,6 +41,7 @@ import {
   searchDriveFolders,
   searchDriveFiles,
   summarizeDriveFileAmount,
+  summarizeDriveInvoiceFiles,
   summarizeDriveLookup,
   summarizeDriveFiles
 } from './src/google-drive.mjs';
@@ -170,6 +173,10 @@ const server = createServer(async (request, response) => {
         const lineDriveContext = loadLineDriveContext(config.lineDriveContextPath);
         if (isDriveFileDetailRequest(userText, lineDriveContext)) {
           return answerDriveFileDetail(userText, config.google, lineDriveContext);
+        }
+
+        if (isDriveInvoiceLookupRequest(userText, lineDriveContext)) {
+          return summarizeDriveInvoiceFiles(findDriveInvoiceFiles(userText, lineDriveContext.files || []));
         }
 
         if (isDriveLookupRequest(userText)) {
