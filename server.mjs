@@ -7,7 +7,7 @@ import {
   getGmailAccessToken,
   getTodayJstDate
 } from './src/gmail.mjs';
-import { handleLineWebhook } from './src/line.mjs';
+import { handleLineWebhook, pushLineText } from './src/line.mjs';
 import { createSuehiroReply } from './src/openai.mjs';
 import { loadKnowledgeContext } from './src/knowledge.mjs';
 import {
@@ -62,6 +62,7 @@ const port = Number(process.env.PORT || 3000);
 const config = {
   channelSecret: process.env.LINE_CHANNEL_SECRET,
   channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
+  lineReportToId: process.env.LINE_REPORT_TO_ID || process.env.LINE_USER_ID || '',
   openaiApiKey: process.env.OPENAI_API_KEY,
   openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
   google: getGoogleConfig(process.env),
@@ -122,6 +123,22 @@ const server = createServer(async (request, response) => {
     } catch (error) {
       console.error(error);
       send(response, 500, 'Google Drive authorization failed');
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && request.url === '/admin/google-reauth-alert') {
+    if (!config.channelSecret || request.headers['x-admin-token'] !== config.channelSecret) {
+      send(response, 401, 'Unauthorized');
+      return;
+    }
+
+    try {
+      await sendGoogleReauthAlertFromServer();
+      send(response, 200, 'Google reauth alert sent.');
+    } catch (error) {
+      console.error(error);
+      send(response, 500, `Google reauth alert failed: ${error.message}`);
     }
     return;
   }
@@ -459,6 +476,18 @@ function buildGoogleReauthMessage(reason) {
     '',
     '再認証後、もう一度同じ操作を送ってください。'
   ].join('\n');
+}
+
+async function sendGoogleReauthAlertFromServer() {
+  if (!config.lineReportToId || !config.channelAccessToken) {
+    throw new Error('Missing LINE_REPORT_TO_ID or LINE_CHANNEL_ACCESS_TOKEN');
+  }
+
+  await pushLineText(
+    config.lineReportToId,
+    config.channelAccessToken,
+    buildGoogleReauthMessage('Google認証の再確認が必要です。下記URLから再認証してください。')
+  );
 }
 
 function getGoogleAuthUrlForLine() {
