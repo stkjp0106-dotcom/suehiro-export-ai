@@ -226,8 +226,20 @@ async function answerDriveLookup(userText, googleConfig) {
     });
   } catch (error) {
     console.error(error);
+    if (isGoogleDriveScopeError(error)) {
+      return [
+        'Google Driveを見る権限が今のGoogle認可トークンに入っていません。',
+        'Gmail用に認可したトークンを、Drive閲覧権限つきで作り直す必要があります。',
+        'こちらで再認可URLを開くので、認可後に新しい GOOGLE_REFRESH_TOKEN をRailwayへ入れ直してください。'
+      ].join('\n');
+    }
     return `Google Drive検索でエラーが出ました: ${error.message}`;
   }
+}
+
+function isGoogleDriveScopeError(error) {
+  const message = String(error?.message || '');
+  return /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient authentication scopes|insufficientPermissions/i.test(message);
 }
 
 function handleNaturalProspectLineCommand(command, prospectConfig) {

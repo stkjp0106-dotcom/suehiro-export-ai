@@ -11,6 +11,7 @@ import {
   createGmailReplyDraft,
   findGmailLabelId,
   getGmailAccessToken,
+  GMAIL_SCOPES,
   listGmailHistory,
   normalizeGmailMessage
 } from '../src/gmail.mjs';
@@ -40,6 +41,13 @@ test('getGmailAccessToken refreshes with GOOGLE_REFRESH_TOKEN', async () => {
   );
 
   assert.equal(token, 'gmail-token');
+});
+
+test('GMAIL_SCOPES includes Drive readonly for shared Google token', () => {
+  assert.match(GMAIL_SCOPES, /gmail\.readonly/);
+  assert.match(GMAIL_SCOPES, /gmail\.compose/);
+  assert.match(GMAIL_SCOPES, /gmail\.modify/);
+  assert.match(GMAIL_SCOPES, /drive\.readonly/);
 });
 
 test('listGmailHistory returns inbox message additions and next historyId', async () => {

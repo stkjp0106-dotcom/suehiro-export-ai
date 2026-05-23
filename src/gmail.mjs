@@ -1,4 +1,4 @@
-import { getValidAccessToken } from './google-drive.mjs';
+import { DRIVE_READONLY_SCOPE, getValidAccessToken } from './google-drive.mjs';
 
 const GMAIL_BASE_URL = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const SUEHIRO_EMAIL_SIGNATURE_LINES = [
@@ -15,7 +15,8 @@ const SUEHIRO_EMAIL_SIGNATURE_LINES = [
 export const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.compose',
-  'https://www.googleapis.com/auth/gmail.modify'
+  'https://www.googleapis.com/auth/gmail.modify',
+  DRIVE_READONLY_SCOPE
 ].join(' ');
 
 export async function getGmailAccessToken(config, fetchImpl = fetch) {

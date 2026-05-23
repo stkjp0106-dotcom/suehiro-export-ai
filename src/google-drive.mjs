@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files';
-const DRIVE_READONLY_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+export const DRIVE_READONLY_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
 const DEFAULT_TOKEN_PATH = '.tokens/google-drive.json';
 
 export function getGoogleConfig(env = process.env) {
