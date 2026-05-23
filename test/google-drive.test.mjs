@@ -64,6 +64,40 @@ test('isGoogleAuthExpiredError detects expired refresh token failures', () => {
   assert.equal(isGoogleAuthExpiredError(new Error('Google Drive search failed: 403 insufficientPermissions')), false);
 });
 
+test('getValidAccessToken falls back to saved tokens when env refresh token is expired', async () => {
+  const tempTokenPath = `./.tmp-google-token-${Date.now()}.json`;
+  const { writeFileSync, unlinkSync } = await import('node:fs');
+  writeFileSync(tempTokenPath, JSON.stringify({ refresh_token: 'saved-refresh' }), 'utf8');
+
+  try {
+    const { getValidAccessToken } = await import('../src/google-drive.mjs');
+    const calls = [];
+    const token = await getValidAccessToken(
+      {
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        refreshToken: 'expired-env-refresh',
+        tokenPath: tempTokenPath
+      },
+      async (_url, options) => {
+        const body = options.body.toString();
+        calls.push(body);
+        if (body.includes('expired-env-refresh')) {
+          return { ok: false, text: async () => '{"error":"invalid_grant"}' };
+        }
+        return { ok: true, json: async () => ({ access_token: 'saved-access', expires_in: 3600 }) };
+      }
+    );
+
+    assert.equal(token, 'saved-access');
+    assert.equal(calls.length, 2);
+    assert.match(calls[0], /expired-env-refresh/);
+    assert.match(calls[1], /saved-refresh/);
+  } finally {
+    unlinkSync(tempTokenPath);
+  }
+});
+
 test('exchangeCodeForTokens posts to Google token endpoint', async () => {
   const calls = [];
 

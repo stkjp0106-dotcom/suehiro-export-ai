@@ -4,7 +4,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { loadDotEnv } from './src/env.mjs';
 import {
   deleteGmailDraftsForJstDate,
+  GMAIL_SCOPES,
   getGmailAccessToken,
+  getGmailProfile,
   getTodayJstDate
 } from './src/gmail.mjs';
 import { handleLineWebhook, pushLineText } from './src/line.mjs';
@@ -98,7 +100,7 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    response.writeHead(302, { Location: buildGoogleAuthUrl(config.google) });
+    response.writeHead(302, { Location: buildGoogleAuthUrl(config.google, GMAIL_SCOPES) });
     response.end();
     return;
   }
@@ -139,6 +141,22 @@ const server = createServer(async (request, response) => {
     } catch (error) {
       console.error(error);
       send(response, 500, `Google reauth alert failed: ${error.message}`);
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && request.url === '/admin/google-connection-check') {
+    if (!config.channelSecret || request.headers['x-admin-token'] !== config.channelSecret) {
+      send(response, 401, 'Unauthorized');
+      return;
+    }
+
+    try {
+      const result = await checkGoogleConnectionFromServer();
+      send(response, 200, JSON.stringify(result, null, 2), 'application/json; charset=utf-8');
+    } catch (error) {
+      console.error(error);
+      send(response, 500, JSON.stringify({ ok: false, error: error.message }, null, 2), 'application/json; charset=utf-8');
     }
     return;
   }
@@ -488,6 +506,24 @@ async function sendGoogleReauthAlertFromServer() {
     config.channelAccessToken,
     buildGoogleReauthMessage('Google認証の再確認が必要です。下記URLから再認証してください。')
   );
+}
+
+async function checkGoogleConnectionFromServer() {
+  const accessToken = await getGmailAccessToken(config.google);
+  const gmailProfile = await getGmailProfile(accessToken);
+  const driveFiles = await searchDriveFiles('SUEHIRO', accessToken);
+
+  return {
+    ok: true,
+    gmail: {
+      emailAddress: gmailProfile.emailAddress || '',
+      historyId: gmailProfile.historyId || ''
+    },
+    drive: {
+      reachable: true,
+      sampleCount: driveFiles.length
+    }
+  };
 }
 
 function getGoogleAuthUrlForLine() {

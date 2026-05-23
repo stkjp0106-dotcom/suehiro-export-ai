@@ -109,8 +109,14 @@ export function loadGoogleTokens(tokenPath = DEFAULT_TOKEN_PATH) {
 
 export async function getValidAccessToken(config, fetchImpl = fetch) {
   if (config.refreshToken) {
-    const refreshed = await refreshAccessToken(config.refreshToken, config, fetchImpl);
-    return refreshed.access_token;
+    try {
+      const refreshed = await refreshAccessToken(config.refreshToken, config, fetchImpl);
+      return refreshed.access_token;
+    } catch (error) {
+      if (!isGoogleAuthExpiredError(error)) {
+        throw error;
+      }
+    }
   }
 
   const tokens = loadGoogleTokens(config.tokenPath);
