@@ -7,8 +7,7 @@ const SUEHIRO_EMAIL_SIGNATURE_LINES = [
   'SUEHIRO TRADING Co., Ltd.',
   '',
   'Mob/Whatsapp : +81(0)9061407648',
-  'Web :',
-  'https://suehirotrd.com/sales/',
+  'Web : https://suehirotrd.com/sales/',
   '',
   '1-13-5-C63 Asakusa, Taito-ku, Tokyo, Japan. 111-0032'
 ];
