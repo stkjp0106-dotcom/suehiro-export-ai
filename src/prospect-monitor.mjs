@@ -12,6 +12,7 @@ const OPENAI_RESPONSES_API_URL = 'https://api.openai.com/v1/responses';
 const DEFAULT_STATE_PATH = '.state/prospect-monitor.json';
 const DEFAULT_TARGET_MARKETS = 'Hong Kong, Singapore, Vietnam, Philippines, Thailand';
 const DEFAULT_PRODUCTS = 'Japanese wagyu beef, beef tongue, Japanese meat export';
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const DEFAULT_COMPANY_PITCH = [
   'SUEHIRO TRADING Co., Ltd. is a Japan-based export partner for Japanese meat products.',
   'We want to propose Japanese wagyu beef and related Japanese meat products to overseas importers, distributors, wholesalers, retailers, and food-service buyers.',
@@ -99,7 +100,8 @@ export function getProspectMonitorConfig(env = process.env) {
   return {
     enabled: env.PROSPECT_MONITOR_ENABLED !== 'false',
     intervalHours: Number(env.PROSPECT_INTERVAL_HOURS || 24),
-    runOnStart: env.PROSPECT_RUN_ON_START !== 'false',
+    runOnStart: env.PROSPECT_RUN_ON_START === 'true',
+    scheduledHourJst: Number(env.PROSPECT_SCHEDULE_HOUR_JST || 0),
     maxProspects: Number(env.PROSPECT_MAX_PROSPECTS || 5),
     statePath: env.PROSPECT_STATE_PATH || join(env.DATA_DIR || '.', DEFAULT_STATE_PATH),
     targetMarkets: env.PROSPECT_TARGET_MARKETS || DEFAULT_TARGET_MARKETS,
@@ -372,14 +374,14 @@ export function validateProspectMonitorConfig(config) {
 export async function runProspectMonitor(config, options = {}) {
   const logger = options.logger || console;
   const sleep = options.sleep || delay;
+  const now = options.now || (() => new Date());
   let stopped = false;
 
-  logger.info(`Prospect monitor starting: intervalHours=${config.intervalHours} maxProspects=${config.maxProspects}`);
+  logger.info(`Prospect monitor starting: schedule=${formatJstHour(config.scheduledHourJst)} JST maxProspects=${config.maxProspects}`);
 
   while (!stopped) {
     try {
-      const state = loadProspectState(config.statePath);
-      if (shouldRunProspectSearch(state, config) || config.runOnStart) {
+      if (config.runOnStart) {
         await runProspectSearch(config, options);
         config.runOnStart = false;
       }
@@ -387,7 +389,16 @@ export async function runProspectMonitor(config, options = {}) {
       logger.error(`Prospect monitor failed: ${error.stack || error.message}`);
     }
 
-    await sleep(config.intervalHours * 60 * 60 * 1000);
+    const nextRunAt = getNextJstScheduledRunAt(now(), config.scheduledHourJst);
+    const sleepMs = Math.max(1000, nextRunAt.getTime() - now().getTime());
+    logger.info(`Next prospect search scheduled at ${nextRunAt.toISOString()} (${formatJstDateTime(nextRunAt)} JST)`);
+    await sleep(sleepMs);
+
+    try {
+      await runProspectSearch(config, options);
+    } catch (error) {
+      logger.error(`Prospect monitor failed: ${error.stack || error.message}`);
+    }
   }
 
   return {
@@ -395,6 +406,35 @@ export async function runProspectMonitor(config, options = {}) {
       stopped = true;
     }
   };
+}
+
+export function getNextJstScheduledRunAt(now = new Date(), scheduledHourJst = 0) {
+  const hour = normalizeJstHour(scheduledHourJst);
+  const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
+  const jstNow = new Date(nowMs + JST_OFFSET_MS);
+  const nextRunUtcMs = Date.UTC(
+    jstNow.getUTCFullYear(),
+    jstNow.getUTCMonth(),
+    jstNow.getUTCDate(),
+    hour,
+    0,
+    0,
+    0
+  ) - JST_OFFSET_MS;
+
+  if (nextRunUtcMs > nowMs) {
+    return new Date(nextRunUtcMs);
+  }
+
+  return new Date(Date.UTC(
+    jstNow.getUTCFullYear(),
+    jstNow.getUTCMonth(),
+    jstNow.getUTCDate() + 1,
+    hour,
+    0,
+    0,
+    0
+  ) - JST_OFFSET_MS);
 }
 
 export async function runProspectSearch(config, options = {}) {
@@ -601,15 +641,6 @@ export function saveProspectState(path, state) {
   writeFileSync(path, JSON.stringify(state, null, 2), 'utf8');
 }
 
-function shouldRunProspectSearch(state, config) {
-  if (!state.lastRunAt) {
-    return true;
-  }
-
-  const elapsedMs = Date.now() - new Date(state.lastRunAt).getTime();
-  return elapsedMs >= config.intervalHours * 60 * 60 * 1000;
-}
-
 function buildDefaultProspectState() {
   return {
     lastRunAt: '',
@@ -618,6 +649,26 @@ function buildDefaultProspectState() {
     targetProfile: '',
     pendingProspectDrafts: []
   };
+}
+
+function normalizeJstHour(value) {
+  const hour = Number(value);
+  if (!Number.isFinite(hour)) {
+    return 0;
+  }
+  return Math.min(23, Math.max(0, Math.trunc(hour)));
+}
+
+function formatJstHour(value) {
+  return `${String(normalizeJstHour(value)).padStart(2, '0')}:00`;
+}
+
+function formatJstDateTime(date) {
+  const jst = new Date(date.getTime() + JST_OFFSET_MS);
+  return [
+    `${jst.getUTCFullYear()}-${String(jst.getUTCMonth() + 1).padStart(2, '0')}-${String(jst.getUTCDate()).padStart(2, '0')}`,
+    `${String(jst.getUTCHours()).padStart(2, '0')}:${String(jst.getUTCMinutes()).padStart(2, '0')}`
+  ].join(' ');
 }
 
 function normalizeProspect(item) {

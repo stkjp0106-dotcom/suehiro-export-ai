@@ -9,6 +9,7 @@ import {
   discoverProspects,
   getEffectiveProspectTargetProfile,
   getEffectiveProspectTargetMarkets,
+  getNextJstScheduledRunAt,
   getProspectMonitorConfig,
   parseProspectRunCommand,
   parseProspectSendDraftCommand,
@@ -31,6 +32,7 @@ test('getProspectMonitorConfig reads scheduling and search settings', () => {
     LINE_CHANNEL_ACCESS_TOKEN: 'line-token',
     LINE_REPORT_TO_ID: 'line-user-id',
     PROSPECT_INTERVAL_HOURS: '12',
+    PROSPECT_SCHEDULE_HOUR_JST: '0',
     PROSPECT_MAX_PROSPECTS: '3',
     PROSPECT_TARGET_MARKETS: 'Hong Kong',
     PROSPECT_TARGET_PROFILE: 'Premium seafood importers with Japan import experience',
@@ -39,12 +41,34 @@ test('getProspectMonitorConfig reads scheduling and search settings', () => {
   });
 
   assert.equal(config.intervalHours, 12);
+  assert.equal(config.runOnStart, false);
+  assert.equal(config.scheduledHourJst, 0);
   assert.equal(config.maxProspects, 3);
   assert.equal(config.targetMarkets, 'Hong Kong');
   assert.equal(config.targetProfile, 'Premium seafood importers with Japan import experience');
   assert.equal(config.products, 'beef tongue');
   assert.equal(config.companyPitch, 'We propose Japanese wagyu and coordinate export documents.');
   assert.deepEqual(validateProspectMonitorConfig(config), []);
+});
+
+test('getProspectMonitorConfig only runs on start when explicitly enabled', () => {
+  assert.equal(getProspectMonitorConfig({}).runOnStart, false);
+  assert.equal(getProspectMonitorConfig({ PROSPECT_RUN_ON_START: 'true' }).runOnStart, true);
+});
+
+test('getNextJstScheduledRunAt fixes prospect task to Japan midnight', () => {
+  assert.equal(
+    getNextJstScheduledRunAt(new Date('2026-05-22T14:59:00.000Z'), 0).toISOString(),
+    '2026-05-22T15:00:00.000Z'
+  );
+  assert.equal(
+    getNextJstScheduledRunAt(new Date('2026-05-22T15:00:00.000Z'), 0).toISOString(),
+    '2026-05-23T15:00:00.000Z'
+  );
+  assert.equal(
+    getNextJstScheduledRunAt(new Date('2026-05-23T06:00:00.000Z'), 0).toISOString(),
+    '2026-05-23T15:00:00.000Z'
+  );
 });
 
 test('buildProspectSearchInput includes prior prospects', () => {
