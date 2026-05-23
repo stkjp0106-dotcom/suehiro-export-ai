@@ -9,6 +9,7 @@ import {
   createGmailLabel,
   createGmailOutboundDraft,
   createGmailReplyDraft,
+  deleteGmailDraft,
   findGmailLabelId,
   getGmailAccessToken,
   GMAIL_SCOPES,
@@ -222,6 +223,16 @@ test('sendGmailDraft calls Gmail drafts send endpoint', async () => {
   });
 
   assert.equal(message.id, 'sent-message-id');
+});
+
+test('deleteGmailDraft calls Gmail drafts delete endpoint', async () => {
+  const result = await deleteGmailDraft('draft-id', 'gmail-token', async (url, options) => {
+    assert.match(String(url), /\/gmail\/v1\/users\/me\/drafts\/draft-id$/);
+    assert.equal(options.method, 'DELETE');
+    return { ok: true, status: 204, json: async () => ({}) };
+  });
+
+  assert.equal(result, null);
 });
 
 test('buildOutboundMime encodes non-ascii subjects', () => {

@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import {
   buildGmailDraftHtml,
   createGmailOutboundDraft,
+  deleteGmailDraft,
   getGmailAccessToken,
   sendGmailDraft
 } from './gmail.mjs';
@@ -194,11 +195,14 @@ export function parseProspectSendDraftCommand(text) {
     .replace(/営業メール|営業候補|候補メール|下書き|ドラフト|draft/gi, '')
     .replace(/の/g, '');
 
-  if (/^(?:全部|全て|すべて|all)(?:だけ|を)?(?:送信|送って|送ってください|send)$/i.test(commandText)) {
-    return { action: 'send', selection: 'all', indices: [] };
+  const deleteOthers = /他|残り|それ以外|以外|削除|消して|delete|remove/i.test(value);
+  const excludeDeleted = /今後|次回|候補から除外|除外|出さない|外して|exclude/i.test(value);
+
+  if (/^(?:全部|全て|すべて|all)(?:だけ|を)?(?:送信|送って|送ってください|send)(?:.*)?$/i.test(commandText)) {
+    return { action: 'send', selection: 'all', indices: [], deleteOthers: false, excludeDeleted: false };
   }
 
-  const numberedCommand = commandText.match(/^((?:\d+番?(?:だけ)?(?:と|、|,|・|&)?)+)(?:だけ|を)?(?:送信|送って|送ってください|send)$/i);
+  const numberedCommand = commandText.match(/^((?:\d+番?(?:だけ)?(?:と|、|,|・|&)?)+)(?:だけ|を)?(?:送信|送って|送ってください|send)(?:.*)?$/i);
   if (!numberedCommand) {
     return null;
   }
@@ -211,7 +215,13 @@ export function parseProspectSendDraftCommand(text) {
     return null;
   }
 
-  return { action: 'send', selection: 'indices', indices: [...new Set(indices)] };
+  return {
+    action: 'send',
+    selection: 'indices',
+    indices: [...new Set(indices)],
+    deleteOthers,
+    excludeDeleted
+  };
 }
 
 export async function classifyProspectLineCommand(text, config, fetchImpl = fetch) {
@@ -489,6 +499,8 @@ export async function sendProspectDraftsFromLine(command, config, options = {}) 
   const accessToken = await getGmailAccessToken(config.google, options.fetchImpl);
   const sent = [];
   const failed = [];
+  const deleted = [];
+  const deleteFailed = [];
   for (const draft of targets) {
     try {
       await sendGmailDraft(draft.draftId, accessToken, options.fetchImpl);
@@ -498,8 +510,26 @@ export async function sendProspectDraftsFromLine(command, config, options = {}) 
     }
   }
 
+  const targetIds = new Set(targets.map((draft) => draft.draftId));
+  const deleteTargets = command.deleteOthers
+    ? pendingDrafts.filter((draft) => !targetIds.has(draft.draftId))
+    : [];
+  for (const draft of deleteTargets) {
+    try {
+      await deleteGmailDraft(draft.draftId, accessToken, options.fetchImpl);
+      deleted.push(draft);
+      if (command.excludeDeleted) {
+        addSeenProspect(state, draft);
+      }
+    } catch (error) {
+      deleteFailed.push({ draft, error });
+    }
+  }
+
   const sentIds = new Set(sent.map((draft) => draft.draftId));
-  state.pendingProspectDrafts = pendingDrafts.filter((draft) => !sentIds.has(draft.draftId));
+  const deletedIds = new Set(deleted.map((draft) => draft.draftId));
+  state.pendingProspectDrafts = pendingDrafts.filter((draft) => !sentIds.has(draft.draftId) && !deletedIds.has(draft.draftId));
+  trimSeenProspects(state);
   (options.saveState || saveProspectState)(config.statePath, state);
 
   const lines = [];
@@ -512,6 +542,21 @@ export async function sendProspectDraftsFromLine(command, config, options = {}) 
   if (failed.length) {
     lines.push('', '送信できなかった下書き:');
     for (const { draft, error } of failed) {
+      lines.push(`${draft.index}. ${draft.company}: ${error.message}`);
+    }
+  }
+  if (deleted.length) {
+    lines.push('', '未送信の下書きを削除しました。');
+    for (const draft of deleted) {
+      lines.push(`${draft.index}. ${draft.company} <${draft.email}>`);
+    }
+    if (command.excludeDeleted) {
+      lines.push('', '削除した会社は今後の候補から除外します。');
+    }
+  }
+  if (deleteFailed.length) {
+    lines.push('', '削除できなかった下書き:');
+    for (const { draft, error } of deleteFailed) {
       lines.push(`${draft.index}. ${draft.company}: ${error.message}`);
     }
   }
@@ -689,11 +734,27 @@ function normalizeProspectTargetMarkets(value) {
   return compactText(String(value || '').replace(/[、，]/g, ', '));
 }
 
+function addSeenProspect(state, draft) {
+  if (!Array.isArray(state.seenProspects)) {
+    state.seenProspects = [];
+  }
+
+  for (const value of [draft.website, draft.email, draft.company]) {
+    const item = compactText(value);
+    if (item && !state.seenProspects.includes(item)) {
+      state.seenProspects.push(item);
+    }
+  }
+}
+
 function compactText(text) {
   return String(text || '').replace(/\s+/g, ' ').trim();
 }
 
 function trimSeenProspects(state, limit = 500) {
+  if (!Array.isArray(state.seenProspects)) {
+    state.seenProspects = [];
+  }
   if (state.seenProspects.length > limit) {
     state.seenProspects = state.seenProspects.slice(-limit);
   }

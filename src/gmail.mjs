@@ -134,6 +134,13 @@ export async function sendGmailDraft(draftId, accessToken, fetchImpl = fetch) {
   });
 }
 
+export async function deleteGmailDraft(draftId, accessToken, fetchImpl = fetch) {
+  return gmailRequest(`/drafts/${encodeURIComponent(draftId)}`, accessToken, {
+    method: 'DELETE',
+    fetchImpl
+  });
+}
+
 export async function findGmailLabelId(labelName, accessToken, fetchImpl = fetch) {
   const data = await gmailRequest('/labels', accessToken, { fetchImpl });
   const label = (data.labels || []).find((item) => item.name === labelName);

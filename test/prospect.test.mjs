@@ -153,22 +153,37 @@ test('parseProspectSendDraftCommand handles LINE send approval phrases', () => {
   assert.deepEqual(parseProspectSendDraftCommand('2だけ送信'), {
     action: 'send',
     selection: 'indices',
-    indices: [2]
+    indices: [2],
+    deleteOthers: false,
+    excludeDeleted: false
   });
   assert.deepEqual(parseProspectSendDraftCommand('1と3送って'), {
     action: 'send',
     selection: 'indices',
-    indices: [1, 3]
+    indices: [1, 3],
+    deleteOthers: false,
+    excludeDeleted: false
   });
   assert.deepEqual(parseProspectSendDraftCommand('2番の営業メール送って'), {
     action: 'send',
     selection: 'indices',
-    indices: [2]
+    indices: [2],
+    deleteOthers: false,
+    excludeDeleted: false
+  });
+  assert.deepEqual(parseProspectSendDraftCommand('3だけ送信 他は削除 こんかい削除した会社は今後候補から除外'), {
+    action: 'send',
+    selection: 'indices',
+    indices: [3],
+    deleteOthers: true,
+    excludeDeleted: true
   });
   assert.deepEqual(parseProspectSendDraftCommand('全部送信'), {
     action: 'send',
     selection: 'all',
-    indices: []
+    indices: [],
+    deleteOthers: false,
+    excludeDeleted: false
   });
   assert.equal(parseProspectSendDraftCommand('2だけ確認'), null);
   assert.equal(
@@ -501,6 +516,58 @@ test('sendProspectDraftsFromLine sends selected pending Gmail draft', async () =
   assert.match(reply, /Second Co/);
   assert(calls.some((call) => call.url.endsWith('/drafts/send')));
   assert.deepEqual(savedState.pendingProspectDrafts.map((draft) => draft.draftId), ['draft-1']);
+});
+
+test('sendProspectDraftsFromLine deletes non-selected drafts and excludes them', async () => {
+  const calls = [];
+  let savedState = null;
+  const config = getProspectMonitorConfig({
+    GOOGLE_CLIENT_ID: 'client-id',
+    GOOGLE_CLIENT_SECRET: 'client-secret',
+    GOOGLE_REFRESH_TOKEN: 'refresh-token'
+  });
+
+  const reply = await sendProspectDraftsFromLine(
+    { action: 'send', selection: 'indices', indices: [3], deleteOthers: true, excludeDeleted: true },
+    config,
+    {
+      loadState: () => ({
+        seenProspects: ['https://already.example'],
+        pendingProspectDrafts: [
+          { index: 1, draftId: 'draft-1', company: 'First Co', email: 'first@example.com', website: 'https://first.example' },
+          { index: 2, draftId: 'draft-2', company: 'Second Co', email: 'second@example.com', website: 'https://second.example' },
+          { index: 3, draftId: 'draft-3', company: 'Third Co', email: 'third@example.com', website: 'https://third.example' }
+        ]
+      }),
+      saveState: (_path, nextState) => {
+        savedState = nextState;
+      },
+      fetchImpl: async (url, options = {}) => {
+        calls.push({ url: String(url), options });
+        if (String(url).includes('oauth2.googleapis.com')) {
+          return { ok: true, json: async () => ({ access_token: 'gmail-token' }) };
+        }
+        if (String(url).endsWith('/drafts/send')) {
+          assert.deepEqual(JSON.parse(options.body), { id: 'draft-3' });
+          return { ok: true, json: async () => ({ id: 'sent-message-id' }) };
+        }
+        if (String(url).match(/\/drafts\/draft-[12]$/)) {
+          return { ok: true, status: 204, json: async () => ({}) };
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      }
+    }
+  );
+
+  assert.match(reply, /Third Co/);
+  assert.match(reply, /未送信の下書きを削除しました/);
+  assert.match(reply, /今後の候補から除外/);
+  assert.equal(calls.filter((call) => call.url.endsWith('/drafts/send')).length, 1);
+  assert.equal(calls.filter((call) => /\/drafts\/draft-[12]$/.test(call.url)).length, 2);
+  assert.deepEqual(savedState.pendingProspectDrafts, []);
+  assert(savedState.seenProspects.includes('https://first.example'));
+  assert(savedState.seenProspects.includes('first@example.com'));
+  assert(savedState.seenProspects.includes('Second Co'));
 });
 
 test('buildProspectLineReport asks for human review before sending', () => {
