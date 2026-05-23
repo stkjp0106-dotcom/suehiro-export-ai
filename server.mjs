@@ -16,13 +16,18 @@ import {
 } from './src/prospect-monitor.mjs';
 import {
   buildGoogleAuthUrl,
+  buildDriveLookupQuery,
   exchangeCodeForTokens,
   getValidAccessToken,
   getGoogleConfig,
   hasGoogleConfig,
+  isDriveLookupRequest,
+  listDriveFolderChildren,
   resolveTokenPath,
   saveGoogleTokens,
+  searchDriveFolders,
   searchDriveFiles,
+  summarizeDriveLookup,
   summarizeDriveFiles
 } from './src/google-drive.mjs';
 
@@ -144,6 +149,10 @@ const server = createServer(async (request, response) => {
           return 'テキストで送ってください。';
         }
 
+        if (isDriveLookupRequest(userText)) {
+          return answerDriveLookup(userText, config.google);
+        }
+
         return createSuehiroReply(userText, {
           apiKey: config.openaiApiKey,
           model: config.openaiModel,
@@ -184,6 +193,41 @@ async function buildKnowledgeContext(userText, googleConfig) {
   }
 
   return chunks.filter(Boolean).join('\n\n');
+}
+
+async function answerDriveLookup(userText, googleConfig) {
+  if (!hasGoogleConfig(googleConfig)) {
+    return 'Google Drive検索の設定が未完了です。GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI を確認してください。';
+  }
+
+  const query = buildDriveLookupQuery(userText);
+  if (!query) {
+    return '確認したいGoogle Driveのフォルダ名かファイル名をもう少し具体的に送ってください。';
+  }
+
+  try {
+    const accessToken = await getValidAccessToken(googleConfig);
+    if (!accessToken) {
+      return 'Google Driveの認可がまだ完了していません。/google/auth で認可してください。';
+    }
+
+    const folders = await searchDriveFolders(query, accessToken);
+    const selectedFolders = folders.slice(0, 3);
+    const childrenByFolder = [];
+    for (const folder of selectedFolders) {
+      childrenByFolder.push(await listDriveFolderChildren(folder.id, accessToken));
+    }
+    const files = folders.length ? [] : await searchDriveFiles(query, accessToken);
+    return summarizeDriveLookup({
+      query,
+      folders: selectedFolders,
+      childrenByFolder,
+      files
+    });
+  } catch (error) {
+    console.error(error);
+    return `Google Drive検索でエラーが出ました: ${error.message}`;
+  }
 }
 
 function handleNaturalProspectLineCommand(command, prospectConfig) {

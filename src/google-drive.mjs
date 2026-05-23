@@ -153,6 +153,59 @@ export async function searchDriveFiles(query, accessToken, fetchImpl = fetch) {
   return data.files || [];
 }
 
+export async function searchDriveFolders(query, accessToken, fetchImpl = fetch) {
+  const terms = getDriveSearchTerms(query);
+  const nameFilters = terms.map((term) => `name contains '${escapeDriveQuery(term)}'`);
+  const q = [
+    'trashed = false',
+    "mimeType = 'application/vnd.google-apps.folder'",
+    nameFilters.length ? `(${nameFilters.join(' or ')})` : ''
+  ]
+    .filter(Boolean)
+    .join(' and ');
+
+  const url = new URL(DRIVE_FILES_URL);
+  url.searchParams.set('q', q);
+  url.searchParams.set('pageSize', '10');
+  url.searchParams.set('fields', 'files(id,name,mimeType,webViewLink,modifiedTime,createdTime)');
+  url.searchParams.set('supportsAllDrives', 'true');
+  url.searchParams.set('includeItemsFromAllDrives', 'true');
+
+  const response = await fetchImpl(url.toString(), {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Google Drive folder search failed: ${response.status} ${detail}`);
+  }
+
+  const data = await response.json();
+  return data.files || [];
+}
+
+export async function listDriveFolderChildren(folderId, accessToken, fetchImpl = fetch) {
+  const url = new URL(DRIVE_FILES_URL);
+  url.searchParams.set('q', `'${escapeDriveQuery(folderId)}' in parents and trashed = false`);
+  url.searchParams.set('pageSize', '10');
+  url.searchParams.set('fields', 'files(id,name,mimeType,webViewLink,modifiedTime,createdTime)');
+  url.searchParams.set('orderBy', 'folder,name');
+  url.searchParams.set('supportsAllDrives', 'true');
+  url.searchParams.set('includeItemsFromAllDrives', 'true');
+
+  const response = await fetchImpl(url.toString(), {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Google Drive folder list failed: ${response.status} ${detail}`);
+  }
+
+  const data = await response.json();
+  return data.files || [];
+}
+
 export function summarizeDriveFiles(files) {
   if (!files.length) {
     return 'Google Driveで該当ファイルは見つかりませんでした。';
@@ -163,6 +216,62 @@ export function summarizeDriveFiles(files) {
     ...files
     .map((file, index) => `${index + 1}. ${file.name} (${file.mimeType})\n${file.webViewLink}`)
   ].join('\n');
+}
+
+export function isDriveLookupRequest(text) {
+  const value = String(text || '').toLowerCase();
+  return (
+    /drive|google\s*drive|gdrive|フォルダ|folder|ファイル|file/.test(value) ||
+    /見れる|見られる|見て|確認|探して|検索/.test(value)
+  ) && !/営業候補|輸入者候補|ターゲット|営業エリア/.test(String(text || ''));
+}
+
+export function buildDriveLookupQuery(text) {
+  return String(text || '')
+    .replace(/Google\s*Drive|GDrive|Drive/gi, ' ')
+    .replace(/フォルダ|ファイル|folder|file/gi, ' ')
+    .replace(/見れる|見られる|見れますか|見られますか|見て|確認|探して|検索|中身|内容|ある|ありますか|できる|できますか/gi, ' ')
+    .replace(/[？?。、「」]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function summarizeDriveLookup({ query, folders = [], childrenByFolder = [], files = [] }) {
+  if (!folders.length && !files.length) {
+    return `Google Driveで「${query}」に一致するフォルダ/ファイルは見つかりませんでした。`;
+  }
+
+  const lines = [`Google Driveで「${query}」を確認しました。`];
+
+  for (const [index, folder] of folders.entries()) {
+    lines.push('', `${index + 1}. フォルダ: ${folder.name}`, folder.webViewLink || '');
+    const children = childrenByFolder[index] || [];
+    if (children.length) {
+      lines.push('中身（一部）:');
+      for (const child of children.slice(0, 5)) {
+        lines.push(`- ${child.name}`);
+      }
+    } else {
+      lines.push('中身: 表示できるファイルは見つかりませんでした。');
+    }
+  }
+
+  if (files.length) {
+    lines.push('', '関連ファイル:');
+    for (const file of files.slice(0, 5)) {
+      lines.push(`- ${file.name}`, file.webViewLink || '');
+    }
+  }
+
+  return lines.filter((line) => line !== undefined).join('\n');
+}
+
+function getDriveSearchTerms(query) {
+  return String(query || '')
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter(Boolean)
+    .slice(0, 5);
 }
 
 function escapeDriveQuery(value) {

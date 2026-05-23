@@ -1,10 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildDriveLookupQuery,
   buildGoogleAuthUrl,
   exchangeCodeForTokens,
+  isDriveLookupRequest,
+  listDriveFolderChildren,
   refreshAccessToken,
+  searchDriveFolders,
   searchDriveFiles,
+  summarizeDriveLookup,
   summarizeDriveFiles
 } from '../src/google-drive.mjs';
 
@@ -80,6 +85,65 @@ test('searchDriveFiles searches PDFs by keyword', async () => {
   });
 
   assert.equal(results[0].name, 'IH260512SB.pdf');
+});
+
+test('searchDriveFolders searches folder names', async () => {
+  const results = await searchDriveFolders('HKMI UK', 'access-token', async (url, options) => {
+    assert.equal(options.headers.Authorization, 'Bearer access-token');
+    assert.match(url, /mimeType\+%3D\+%27application%2Fvnd\.google-apps\.folder%27/);
+    assert.match(url, /name\+contains\+%27HKMI%27/);
+    return {
+      ok: true,
+      json: async () => ({
+        files: [
+          {
+            id: 'folder-id',
+            name: 'HKMI UK',
+            mimeType: 'application/vnd.google-apps.folder',
+            webViewLink: 'https://drive.google.com/drive/folders/folder-id'
+          }
+        ]
+      })
+    };
+  });
+
+  assert.equal(results[0].name, 'HKMI UK');
+});
+
+test('listDriveFolderChildren lists visible folder contents', async () => {
+  const results = await listDriveFolderChildren('folder-id', 'access-token', async (url, options) => {
+    assert.equal(options.headers.Authorization, 'Bearer access-token');
+    assert.match(url, /%27folder-id%27\+in\+parents/);
+    assert.match(url, /orderBy=folder%2Cname/);
+    return {
+      ok: true,
+      json: async () => ({
+        files: [{ id: 'child-id', name: 'price-list.pdf', mimeType: 'application/pdf' }]
+      })
+    };
+  });
+
+  assert.equal(results[0].name, 'price-list.pdf');
+});
+
+test('Drive lookup helpers detect folder questions and summarize results', () => {
+  assert.equal(isDriveLookupRequest('HKMI UKフォルダ見れる？'), true);
+  assert.equal(buildDriveLookupQuery('HKMI UKフォルダ見れる？'), 'HKMI UK');
+
+  const summary = summarizeDriveLookup({
+    query: 'HKMI UK',
+    folders: [
+      {
+        name: 'HKMI UK',
+        webViewLink: 'https://drive.google.com/drive/folders/folder-id'
+      }
+    ],
+    childrenByFolder: [[{ name: 'spec.pdf' }, { name: 'quote.xlsx' }]]
+  });
+
+  assert.match(summary, /HKMI UK/);
+  assert.match(summary, /spec\.pdf/);
+  assert.match(summary, /quote\.xlsx/);
 });
 
 test('summarizeDriveFiles formats Drive search results', () => {
