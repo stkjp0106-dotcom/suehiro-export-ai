@@ -12,6 +12,7 @@ import {
   deleteGmailDraft,
   deleteGmailDraftsForJstDate,
   findGmailLabelId,
+  extractLikelyCustomerMessage,
   getGmailAccessToken,
   getTodayJstDate,
   GMAIL_SCOPES,
@@ -350,7 +351,9 @@ test('createGmailAiReplyDraft asks OpenAI for an email body only', async () => {
       const body = JSON.parse(options.body);
       assert.equal(body.model, 'test-model');
       assert.match(body.input, /Quotation request/);
+      assert.match(body.input, /Customer-written message to prioritize/);
       assert.match(body.instructions, /Do not invent prices/);
+      assert.match(body.instructions, /customer-written message is English/);
       return { ok: true, json: async () => ({ output_text: 'Thank you. We will confirm and reply.' }) };
     }
   );
@@ -440,6 +443,34 @@ test('buildGmailReplyDraftInput and buildGmailDraftHtml format content', () => {
   assert.match(html, /Mob\/Whatsapp : \+81\(0\)9061407648/);
   assert.match(html, /https:\/\/suehirotrd\.com\/sales\//);
   assert.match(html, /1-13-5-C63 Asakusa, Taito-ku, Tokyo, Japan\. 111-0032/);
+});
+
+test('buildGmailReplyDraftInput prioritizes English contact form message over Japanese labels', () => {
+  const bodyText = [
+    '差出人: Eric',
+    'Eric@palmbeachmeats.com',
+    '電話番号: 561.303.7595',
+    '題名: Wagyu',
+    '',
+    'メッセージ本文:',
+    'What is required to buy wagyu and receive directly from you?',
+    '',
+    '--',
+    'This email was sent from the contact form at SUEHIRO TRADING Ltd. スエトレです。'
+  ].join('\n');
+
+  assert.equal(
+    extractLikelyCustomerMessage(bodyText),
+    'What is required to buy wagyu and receive directly from you?'
+  );
+
+  const input = buildGmailReplyDraftInput({
+    from: 'Eric <Eric@palmbeachmeats.com>',
+    subject: 'Wagyu',
+    bodyText
+  });
+
+  assert.match(input, /Customer-written message to prioritize for language and intent:\nWhat is required to buy wagyu/);
 });
 
 test('pollGmailMailbox saves first-run baseline from profile', async () => {

@@ -256,11 +256,15 @@ export function normalizeGmailMessage(message) {
 }
 
 export function buildGmailReplyDraftInput(message) {
+  const customerMessage = extractLikelyCustomerMessage(message.bodyText || message.snippet || '');
   return [
     'Incoming email:',
     `From: ${message.from || '(unknown)'}`,
     `Subject: ${message.subject || '(no subject)'}`,
     `Date: ${message.date || '(unknown)'}`,
+    '',
+    'Customer-written message to prioritize for language and intent:',
+    customerMessage || '(not detected)',
     '',
     'Snippet:',
     message.snippet || '',
@@ -268,6 +272,28 @@ export function buildGmailReplyDraftInput(message) {
     'Body:',
     message.bodyText || ''
   ].join('\n');
+}
+
+export function extractLikelyCustomerMessage(text) {
+  const value = String(text || '').replace(/\r\n/g, '\n').trim();
+  if (!value) {
+    return '';
+  }
+
+  const messageBodyMatch = value.match(/(?:メッセージ本文|message body|message|お問い合わせ内容|本文)\s*[:：]\s*\n?([\s\S]*?)(?:\n\s*(?:--\s*(?:\n|$)|This email was sent from|このメールは|差出人|電話番号|題名|件名)(?:\b|$)|$)/i);
+  if (messageBodyMatch?.[1]) {
+    return compactText(messageBodyMatch[1]).slice(0, 2000);
+  }
+
+  const lines = value
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !/^(差出人|電話番号|題名|件名|email|e-mail|name|phone|tel)\s*[:：]/i.test(line))
+    .filter((line) => !/^This email was sent from/i.test(line))
+    .filter((line) => !/^https?:\/\//i.test(line));
+
+  return compactText(lines.join(' ')).slice(0, 2000);
 }
 
 export function buildGmailDraftHtml(replyText, signatureHtml = '') {
@@ -321,6 +347,10 @@ function getHeaderMap(headers) {
     }
   }
   return map;
+}
+
+function compactText(text) {
+  return String(text || '').replace(/\s+/g, ' ').trim();
 }
 
 function getJstDateString(value) {
