@@ -20,6 +20,7 @@ import {
   listGmailDrafts,
   listGmailHistory,
   normalizeGmailMessage,
+  searchGmailMessages,
   sendGmailDraft
 } from '../src/gmail.mjs';
 import {
@@ -272,6 +273,21 @@ test('getGmailDraft asks for draft metadata', async () => {
   });
 
   assert.equal(draft.id, 'draft-id');
+});
+
+test('searchGmailMessages calls Gmail messages search endpoint', async () => {
+  const messages = await searchGmailMessages('in:inbox subject:Wagyu', 'gmail-token', {
+    maxResults: 3,
+    fetchImpl: async (url, options) => {
+      assert.match(String(url), /\/gmail\/v1\/users\/me\/messages/);
+      assert.match(String(url), /maxResults=3/);
+      assert.match(String(url), /q=in%3Ainbox\+subject%3AWagyu/);
+      assert.equal(options.headers.Authorization, 'Bearer gmail-token');
+      return { ok: true, json: async () => ({ messages: [{ id: 'message-id' }] }) };
+    }
+  });
+
+  assert.deepEqual(messages, [{ id: 'message-id' }]);
 });
 
 test('deleteGmailDraftsForJstDate deletes only matching JST date drafts', async () => {

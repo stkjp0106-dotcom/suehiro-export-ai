@@ -6,9 +6,15 @@ import {
   deleteGmailDraftsForJstDate,
   GMAIL_SCOPES,
   getGmailAccessToken,
+  getGmailMessage,
   getGmailProfile,
+  searchGmailMessages,
   getTodayJstDate
 } from './src/gmail.mjs';
+import {
+  getGmailMonitorConfig,
+  processGmailMessage
+} from './src/gmail-monitor.mjs';
 import { handleLineWebhook, pushLineText } from './src/line.mjs';
 import { createSuehiroReply } from './src/openai.mjs';
 import { loadKnowledgeContext } from './src/knowledge.mjs';
@@ -68,6 +74,7 @@ const config = {
   openaiApiKey: process.env.OPENAI_API_KEY,
   openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
   google: getGoogleConfig(process.env),
+  gmail: getGmailMonitorConfig(process.env),
   prospect: getProspectMonitorConfig(process.env),
   lineDriveContextPath: process.env.LINE_DRIVE_CONTEXT_PATH || join(process.env.DATA_DIR || '.', '.state/line-drive-context.json'),
   publicBaseUrl: (process.env.PUBLIC_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || '').replace(/\/+$/, '')
@@ -153,6 +160,24 @@ const server = createServer(async (request, response) => {
 
     try {
       const result = await checkGoogleConnectionFromServer();
+      send(response, 200, JSON.stringify(result, null, 2), 'application/json; charset=utf-8');
+    } catch (error) {
+      console.error(error);
+      send(response, 500, JSON.stringify({ ok: false, error: error.message }, null, 2), 'application/json; charset=utf-8');
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && request.url === '/admin/gmail-regenerate-draft') {
+    if (!config.channelSecret || request.headers['x-admin-token'] !== config.channelSecret) {
+      send(response, 401, 'Unauthorized');
+      return;
+    }
+
+    try {
+      const bodyText = await readRequestBody(request);
+      const params = bodyText ? JSON.parse(bodyText) : {};
+      const result = await regenerateLatestGmailDraftFromServer(params);
       send(response, 200, JSON.stringify(result, null, 2), 'application/json; charset=utf-8');
     } catch (error) {
       console.error(error);
@@ -523,6 +548,26 @@ async function checkGoogleConnectionFromServer() {
       reachable: true,
       sampleCount: driveFiles.length
     }
+  };
+}
+
+async function regenerateLatestGmailDraftFromServer(params = {}) {
+  const accessToken = await getGmailAccessToken(config.google);
+  const query = params.query || 'in:inbox newer_than:14d';
+  const messages = await searchGmailMessages(query, accessToken, { maxResults: Number(params.maxResults || 5) });
+  if (!messages.length) {
+    return { ok: false, query, error: 'No Gmail messages matched the query.' };
+  }
+
+  const message = await getGmailMessage(messages[0].id, accessToken);
+  const result = await processGmailMessage(message, config.gmail, accessToken);
+  return {
+    ok: !result.skipped,
+    query,
+    messageId: messages[0].id,
+    draftId: result.draftId || '',
+    skipped: result.skipped === true,
+    classification: result.classification || null
   };
 }
 

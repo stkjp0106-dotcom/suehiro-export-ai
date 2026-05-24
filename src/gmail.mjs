@@ -98,6 +98,19 @@ export async function getGmailMessage(messageId, accessToken, fetchImpl = fetch)
   return gmailRequest(url.toString(), accessToken, { fetchImpl });
 }
 
+export async function searchGmailMessages(query, accessToken, options = {}) {
+  const url = new URL(`${GMAIL_BASE_URL}/messages`);
+  url.searchParams.set('maxResults', String(options.maxResults || 10));
+  if (query) {
+    url.searchParams.set('q', query);
+  }
+
+  const data = await gmailRequest(url.toString(), accessToken, {
+    fetchImpl: options.fetchImpl
+  });
+  return data.messages || [];
+}
+
 export async function createGmailReplyDraft(originalMessage, htmlBody, accessToken, fetchImpl = fetch) {
   const raw = buildReplyMime(originalMessage, htmlBody);
   return gmailRequest('/drafts', accessToken, {
