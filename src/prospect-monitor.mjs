@@ -27,7 +27,9 @@ const PROSPECT_DISCOVERY_INSTRUCTIONS = [
   'Use web search to find potential importers, distributors, wholesalers, retailers, or food-service buyers outside Japan.',
   'Find companies that are plausible buyers for Japanese wagyu beef, beef tongue, or Japanese meat export products.',
   'Prefer companies with public evidence of importing, distributing, wholesaling, retailing, or food-service sourcing.',
-  'Only include prospects where a public contact email address is visible or strongly available on an official contact page.',
+  'Only include prospects where a public contact email address is visibly published on an official company page or a reliable company profile page.',
+  'Do not invent, guess, or synthesize email addresses from a domain. Never use guessed role addresses such as info@, sales@, contact@, office@, admin@, support@, or hello@ unless that exact email address is visibly published in the evidence.',
+  'The evidence field must quote or explicitly mention the exact email address used in the email field.',
   'Do not include Japanese domestic sellers, generic directories without company evidence, or companies that look unrelated.',
   'Return only compact JSON with key "prospects".',
   'Each prospect must have: company, country, website, email, contact_url, evidence, source_urls, draft_subject, draft_body.',
@@ -663,7 +665,7 @@ export function buildProspectLineReport(drafts) {
 export function parseProspects(text) {
   const data = JSON.parse(stripJsonCodeFence(text));
   const prospects = Array.isArray(data.prospects) ? data.prospects : [];
-  return prospects.map(normalizeProspect).filter((prospect) => prospect.company && prospect.email);
+  return prospects.map(normalizeProspect).filter(isUsableProspect);
 }
 
 export function loadProspectState(path = DEFAULT_STATE_PATH) {
@@ -728,6 +730,52 @@ function normalizeProspect(item) {
     draftSubject: String(item.draft_subject || '').trim() || 'Japanese wagyu export inquiry',
     draftBody: String(item.draft_body || '').trim()
   };
+}
+
+function isUsableProspect(prospect) {
+  if (!prospect.company || !isValidProspectEmail(prospect.email)) {
+    return false;
+  }
+
+  if (isGenericRoleEmail(prospect.email) && !prospectEvidenceMentionsEmail(prospect)) {
+    return false;
+  }
+
+  return true;
+}
+
+function isValidProspectEmail(email) {
+  const value = String(email || '').trim();
+  return /^[^\s@<>]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(value);
+}
+
+function isGenericRoleEmail(email) {
+  const localPart = String(email || '').split('@')[0]?.toLowerCase() || '';
+  return new Set([
+    'admin',
+    'contact',
+    'customerservice',
+    'customer.service',
+    'enquiries',
+    'enquiry',
+    'hello',
+    'info',
+    'inquiries',
+    'mail',
+    'office',
+    'sales',
+    'support'
+  ]).has(localPart);
+}
+
+function prospectEvidenceMentionsEmail(prospect) {
+  const email = String(prospect.email || '').toLowerCase();
+  const evidenceText = [
+    prospect.evidence,
+    prospect.contactUrl,
+    ...(prospect.sourceUrls || [])
+  ].join(' ').toLowerCase();
+  return evidenceText.includes(email);
 }
 
 function normalizeProspectTargetMarkets(value) {

@@ -311,6 +311,39 @@ test('parseProspects normalizes prospects with public emails', () => {
   assert.equal(prospects[0].email, 'buyer@importer.example');
 });
 
+test('parseProspects rejects guessed generic role emails unless evidence quotes them', () => {
+  const prospects = parseProspects(JSON.stringify({
+    prospects: [
+      {
+        company: 'Guessed Info Co',
+        country: 'Hong Kong',
+        website: 'https://guessed.example',
+        email: 'info@guessed.example',
+        contact_url: 'https://guessed.example/contact',
+        evidence: 'Imports premium meat but no visible email is quoted.',
+        source_urls: ['https://guessed.example/contact'],
+        draft_subject: 'Japanese wagyu export inquiry',
+        draft_body: 'Hello, we export Japanese wagyu.'
+      },
+      {
+        company: 'Visible Info Co',
+        country: 'Hong Kong',
+        website: 'https://visible.example',
+        email: 'info@visible.example',
+        contact_url: 'https://visible.example/contact',
+        evidence: 'Official contact page visibly lists info@visible.example for inquiries.',
+        source_urls: ['https://visible.example/contact'],
+        draft_subject: 'Japanese wagyu export inquiry',
+        draft_body: 'Hello, we export Japanese wagyu.'
+      }
+    ]
+  }));
+
+  assert.equal(prospects.length, 1);
+  assert.equal(prospects[0].company, 'Visible Info Co');
+  assert.equal(prospects[0].email, 'info@visible.example');
+});
+
 test('discoverProspects uses OpenAI web search tool', async () => {
   const prospects = await discoverProspects(
     {
@@ -328,6 +361,8 @@ test('discoverProspects uses OpenAI web search tool', async () => {
       assert.equal(body.text.format.type, 'json_schema');
       assert.equal(body.text.format.name, 'prospect_discovery');
       assert.match(body.instructions, /personalized to the prospect/);
+      assert.match(body.instructions, /Do not invent, guess, or synthesize email addresses/);
+      assert.match(body.instructions, /evidence field must quote or explicitly mention the exact email address/);
       assert.match(body.instructions, /SUEHIRO would like to propose Japanese wagyu beef/);
       assert.match(body.instructions, /factory\/processing coordination/);
       assert.match(body.input, /Hong Kong/);
