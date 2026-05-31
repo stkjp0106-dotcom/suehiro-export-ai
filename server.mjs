@@ -186,6 +186,39 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  if (request.method === 'POST' && request.url === '/admin/prospect-run') {
+    if (!config.channelSecret || request.headers['x-admin-token'] !== config.channelSecret) {
+      send(response, 401, 'Unauthorized');
+      return;
+    }
+
+    try {
+      const missing = validateProspectMonitorConfig(config.prospect);
+      if (missing.length) {
+        send(response, 400, JSON.stringify({ ok: false, missing }, null, 2), 'application/json; charset=utf-8');
+        return;
+      }
+
+      const result = await runProspectSearch(config.prospect);
+      send(response, 200, JSON.stringify({
+        ok: true,
+        drafts: result.drafts.map(({ prospect, draftId }, index) => ({
+          index: index + 1,
+          draftId,
+          company: prospect.company,
+          country: prospect.country,
+          email: prospect.email,
+          website: prospect.website,
+          contactUrl: prospect.contactUrl
+        }))
+      }, null, 2), 'application/json; charset=utf-8');
+    } catch (error) {
+      console.error(error);
+      send(response, 500, JSON.stringify({ ok: false, error: error.message }, null, 2), 'application/json; charset=utf-8');
+    }
+    return;
+  }
+
   if (request.method !== 'POST' || request.url !== '/webhook') {
     send(response, 404, 'Not found');
     return;
