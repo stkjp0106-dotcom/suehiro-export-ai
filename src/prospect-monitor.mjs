@@ -39,7 +39,9 @@ const PROSPECT_DISCOVERY_INSTRUCTIONS = [
   'Each draft_body must be personalized to the prospect: mention a specific public feature, business type, product focus, channel, or location from the evidence.',
   'Each draft_body must clearly say that SUEHIRO would like to propose Japanese wagyu beef or relevant Japanese meat products.',
   'Each draft_body must briefly communicate what SUEHIRO can do: practical product proposals, export coordination, factory/processing coordination, documents, and logistics discussion.',
-  'Keep each draft_body short: 120 to 180 words, polite, direct, and easy to review.',
+  'Write each draft_body as a very short first-touch interest check, not a full sales pitch.',
+  'Keep each draft_body short: 70 to 110 words, polite, direct, and easy to review.',
+  'Use at most two short paragraphs plus one soft question. Avoid dense explanations or long company introductions.',
   'End with a soft question asking whether they are interested in reviewing product information or discussing import needs.',
   'Do not write generic emails that could be sent to any company.'
 ].join('\n');
@@ -475,7 +477,8 @@ export async function runProspectSearch(config, options = {}) {
     company: prospect.company,
     country: prospect.country,
     email: prospect.email,
-    website: prospect.website
+    website: prospect.website,
+    contactUrl: prospect.contactUrl
   }));
   state.lastRunAt = new Date().toISOString();
   (options.saveState || saveProspectState)(config.statePath, state);
@@ -617,7 +620,9 @@ export function buildProspectSearchInput(config, state = {}) {
     '- Mention a specific reason this prospect may be relevant based on public evidence.',
     ...(targetProfile ? ['- Respect the target customer profile above; do not include prospects that clearly do not match it.'] : []),
     '- Clearly state that SUEHIRO would like to propose Japanese wagyu beef or related Japanese meat products.',
+    '- Keep the first email as an interest check: one specific reason, one concise SUEHIRO capability sentence, then one soft question.',
     '- Briefly explain SUEHIRO can coordinate product proposal, factory/processing, export documents, and logistics discussion.',
+    '- Do not try to explain everything in the first message; make it easy for the prospect to reply.',
     '- Keep the email concise and conservative; no unconfirmed prices, certificates, approvals, stock, or lead times.',
     '- Do not include a signature; the system appends the standard SUEHIRO signature.',
     '',
@@ -654,6 +659,8 @@ export function buildProspectLineReport(drafts) {
       `${index + 1}. ${prospect.company} (${prospect.country})`,
       `Email: ${prospect.email}`,
       `Web: ${prospect.website}`,
+      ...(prospect.contactUrl ? [`Contact: ${prospect.contactUrl}`] : []),
+      'Next touch: send email first; if there is no reply, try the contact page/form or website listed above.',
       `理由: ${prospect.evidence}`,
       `Draft ID: ${draftId}`
     ].join('\n')),

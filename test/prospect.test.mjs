@@ -365,7 +365,10 @@ test('discoverProspects uses OpenAI web search tool', async () => {
       assert.match(body.instructions, /evidence field must quote or explicitly mention the exact email address/);
       assert.match(body.instructions, /SUEHIRO would like to propose Japanese wagyu beef/);
       assert.match(body.instructions, /factory\/processing coordination/);
+      assert.match(body.instructions, /first-touch interest check/);
+      assert.match(body.instructions, /70 to 110 words/);
       assert.match(body.input, /Hong Kong/);
+      assert.match(body.input, /one specific reason, one concise SUEHIRO capability sentence/);
       return {
         ok: true,
         json: async () => ({
@@ -510,6 +513,7 @@ test('runProspectSearch saves pending drafts for later LINE approval', async () 
   assert.equal(savedState.pendingProspectDrafts[0].index, 1);
   assert.equal(savedState.pendingProspectDrafts[0].draftId, 'draft-id');
   assert.equal(savedState.pendingProspectDrafts[0].email, 'buyer@importer.example');
+  assert.equal(savedState.pendingProspectDrafts[0].contactUrl, 'https://importer.example/contact');
 });
 
 test('sendProspectDraftsFromLine sends selected pending Gmail draft', async () => {
@@ -613,6 +617,7 @@ test('buildProspectLineReport asks for human review before sending', () => {
         country: 'Hong Kong',
         email: 'buyer@importer.example',
         website: 'https://importer.example',
+        contactUrl: 'https://importer.example/contact',
         evidence: 'Imports premium meat.'
       },
       draftId: 'draft-id'
@@ -621,5 +626,7 @@ test('buildProspectLineReport asks for human review before sending', () => {
 
   assert.match(report, /輸入者候補/);
   assert.match(report, /Importer Co/);
+  assert.match(report, /Contact: https:\/\/importer\.example\/contact/);
+  assert.match(report, /Next touch: send email first/);
   assert.match(report, /自動送信はしていません/);
 });
