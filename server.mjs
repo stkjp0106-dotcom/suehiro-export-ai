@@ -80,6 +80,7 @@ const config = {
   publicBaseUrl: (process.env.PUBLIC_BASE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || '').replace(/\/+$/, '')
 };
 config.google.tokenPath = resolveTokenPath(config.google);
+config.prospect.google.tokenPath = config.google.tokenPath;
 
 function readRequestBody(request) {
   return new Promise((resolve, reject) => {
