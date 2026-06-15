@@ -81,6 +81,8 @@ test('buildProspectSearchInput includes prior prospects', () => {
   assert.match(input, /wagyu/);
   assert.match(input, /Japanese wagyu beef/);
   assert.match(input, /factory\/processing/);
+  assert.match(input, /Buyer category rotation/);
+  assert.match(input, /premium seafood importers/);
   assert.match(input, /used\.example\.com/);
 });
 
@@ -364,6 +366,8 @@ test('discoverProspects uses OpenAI web search tool', async () => {
       assert.match(body.instructions, /Do not invent, guess, or synthesize email addresses/);
       assert.match(body.instructions, /evidence field must quote or explicitly mention the exact email address/);
       assert.match(body.instructions, /SUEHIRO would like to propose Japanese wagyu beef/);
+      assert.match(body.instructions, /premium seafood importers/);
+      assert.match(body.instructions, /diverse set across countries and buyer categories/);
       assert.match(body.instructions, /factory\/processing coordination/);
       assert.match(body.instructions, /first-touch interest check/);
       assert.match(body.instructions, /70 to 110 words/);
@@ -514,6 +518,79 @@ test('runProspectSearch saves pending drafts for later LINE approval', async () 
   assert.equal(savedState.pendingProspectDrafts[0].draftId, 'draft-id');
   assert.equal(savedState.pendingProspectDrafts[0].email, 'buyer@importer.example');
   assert.equal(savedState.pendingProspectDrafts[0].contactUrl, 'https://importer.example/contact');
+});
+
+test('runProspectSearch skips already seen company domains returned by OpenAI', async () => {
+  let savedState = null;
+  const config = getProspectMonitorConfig({
+    OPENAI_API_KEY: 'openai-key',
+    OPENAI_MODEL: 'test-model',
+    GOOGLE_CLIENT_ID: 'client-id',
+    GOOGLE_CLIENT_SECRET: 'client-secret',
+    GOOGLE_REFRESH_TOKEN: 'refresh-token',
+    LINE_CHANNEL_ACCESS_TOKEN: 'line-token',
+    LINE_REPORT_TO_ID: 'line-user-id',
+    PROSPECT_MAX_PROSPECTS: '5'
+  });
+
+  const result = await runProspectSearch(config, {
+    logger: { info() {}, error() {} },
+    loadState: () => ({ lastRunAt: '', seenProspects: ['https://repeat.example'] }),
+    saveState: (_path, nextState) => {
+      savedState = nextState;
+    },
+    fetchImpl: async (url, options = {}) => {
+      if (String(url).includes('oauth2.googleapis.com')) {
+        return { ok: true, json: async () => ({ access_token: 'gmail-token' }) };
+      }
+      if (String(url).includes('api.openai.com')) {
+        return {
+          ok: true,
+          json: async () => ({
+            output_text: JSON.stringify({
+              prospects: [
+                {
+                  company: 'Repeat Co',
+                  country: 'Hong Kong',
+                  website: 'https://repeat.example/contact',
+                  email: 'buyer@repeat.example',
+                  contact_url: 'https://repeat.example/contact',
+                  evidence: 'Imports premium meat.',
+                  source_urls: ['https://repeat.example/contact'],
+                  draft_subject: 'Japanese wagyu export inquiry',
+                  draft_body: 'Hello, we export Japanese wagyu.'
+                },
+                {
+                  company: 'Fresh Co',
+                  country: 'Malaysia',
+                  website: 'https://fresh.example',
+                  email: 'buyer@fresh.example',
+                  contact_url: 'https://fresh.example/contact',
+                  evidence: 'Supplies premium frozen food.',
+                  source_urls: ['https://fresh.example/contact'],
+                  draft_subject: 'Japanese wagyu export inquiry',
+                  draft_body: 'Hello, we export Japanese wagyu.'
+                }
+              ]
+            })
+          })
+        };
+      }
+      if (String(url).endsWith('/drafts')) {
+        assert.equal(JSON.parse(options.body).message.raw.includes('buyer@repeat.example'), false);
+        return { ok: true, json: async () => ({ id: 'fresh-draft-id' }) };
+      }
+      if (String(url).includes('api.line.me')) {
+        return { ok: true };
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    }
+  });
+
+  assert.equal(result.drafts.length, 1);
+  assert.equal(result.drafts[0].prospect.company, 'Fresh Co');
+  assert.equal(savedState.pendingProspectDrafts[0].company, 'Fresh Co');
+  assert(savedState.seenProspects.includes('fresh.example'));
 });
 
 test('sendProspectDraftsFromLine sends selected pending Gmail draft', async () => {

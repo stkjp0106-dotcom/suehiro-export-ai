@@ -11,7 +11,7 @@ import { pushLineText } from './line.mjs';
 
 const OPENAI_RESPONSES_API_URL = 'https://api.openai.com/v1/responses';
 const DEFAULT_STATE_PATH = '.state/prospect-monitor.json';
-const DEFAULT_TARGET_MARKETS = 'Hong Kong, Singapore, Vietnam, Philippines, Thailand';
+const DEFAULT_TARGET_MARKETS = 'Hong Kong, Singapore, Vietnam, Philippines, Thailand, Malaysia, Indonesia, Taiwan, Macau, United Arab Emirates';
 const DEFAULT_PRODUCTS = 'Japanese wagyu beef, beef tongue, Japanese meat export';
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const DEFAULT_COMPANY_PITCH = [
@@ -26,7 +26,9 @@ const PROSPECT_DISCOVERY_INSTRUCTIONS = [
   'You are a careful export sales assistant for SUEHIRO TRADING Co., Ltd.',
   'Use web search to find potential importers, distributors, wholesalers, retailers, or food-service buyers outside Japan.',
   'Find companies that are plausible buyers for Japanese wagyu beef, beef tongue, or Japanese meat export products.',
-  'Prefer companies with public evidence of importing, distributing, wholesaling, retailing, or food-service sourcing.',
+  'Broaden the buyer pool beyond wagyu-only shops: include premium seafood importers, Japanese food importers, gourmet food distributors, chilled/frozen food wholesalers, hotel/restaurant suppliers, specialty meat importers, and cold-chain foodservice buyers.',
+  'Prefer companies with public evidence of importing, distributing, wholesaling, retailing, food-service sourcing, premium grocery supply, or HoReCa supply.',
+  'Return a diverse set across countries and buyer categories. Do not keep returning the same well-known companies or the same website domains.',
   'Only include prospects where a public contact email address is visibly published on an official company page or a reliable company profile page.',
   'Do not invent, guess, or synthesize email addresses from a domain. Never use guessed role addresses such as info@, sales@, contact@, office@, admin@, support@, or hello@ unless that exact email address is visibly published in the evidence.',
   'The evidence field must quote or explicitly mention the exact email address used in the email field.',
@@ -456,7 +458,10 @@ export async function runProspectSearch(config, options = {}) {
   const state = (options.loadState || loadProspectState)(config.statePath);
   const accessToken = await getGmailAccessToken(config.google, options.fetchImpl);
   const prospects = await discoverProspects(config, state, options.fetchImpl);
-  const selected = prospects.slice(0, config.maxProspects);
+  const seenKeys = buildSeenProspectKeySet(state);
+  const selected = prospects
+    .filter((prospect) => !isSeenProspect(prospect, seenKeys))
+    .slice(0, config.maxProspects);
   const drafts = [];
 
   for (const prospect of selected) {
@@ -466,7 +471,7 @@ export async function runProspectSearch(config, options = {}) {
       htmlBody: buildGmailDraftHtml(prospect.draftBody)
     }, accessToken, options.fetchImpl);
     drafts.push({ prospect, draftId: draft.id });
-    state.seenProspects.push(prospect.website || prospect.email || prospect.company);
+    addSeenProspect(state, prospect);
     trimSeenProspects(state);
     logger.info(`Prospect draft saved: company=${JSON.stringify(prospect.company)} draftId=${draft.id}`);
   }
@@ -612,6 +617,8 @@ export function buildProspectSearchInput(config, state = {}) {
       `Target customer profile: ${targetProfile}`,
       'Prioritize prospects that match this profile, and mention the matching evidence in each draft.'
     ] : []),
+    'Buyer category rotation: premium seafood importers, Japanese food importers, gourmet food distributors, chilled/frozen food wholesalers, hotel/restaurant suppliers, specialty meat importers, and cold-chain foodservice buyers.',
+    'If not enough unique prospects are available in the narrow target, broaden within nearby Asia-Pacific or Middle East trading hubs while staying relevant.',
     '',
     'SUEHIRO proposal context to reflect in every draft:',
     config.companyPitch || DEFAULT_COMPANY_PITCH,
@@ -619,6 +626,7 @@ export function buildProspectSearchInput(config, state = {}) {
     'Draft quality requirements:',
     '- Mention a specific reason this prospect may be relevant based on public evidence.',
     ...(targetProfile ? ['- Respect the target customer profile above; do not include prospects that clearly do not match it.'] : []),
+    '- Avoid companies, websites, domains, and email addresses listed in the already used section. Prefer fresh companies over familiar names.',
     '- Clearly state that SUEHIRO would like to propose Japanese wagyu beef or related Japanese meat products.',
     '- Keep the first email as an interest check: one specific reason, one concise SUEHIRO capability sentence, then one soft question.',
     '- Briefly explain SUEHIRO can coordinate product proposal, factory/processing, export documents, and logistics discussion.',
@@ -629,7 +637,7 @@ export function buildProspectSearchInput(config, state = {}) {
     `Find up to ${config.maxProspects} new prospects.`,
     '',
     'Already used prospects to avoid:',
-    ...(state.seenProspects || []).slice(-100).map((item) => `- ${item}`)
+    ...(state.seenProspects || []).slice(-200).map((item) => `- ${item}`)
   ].join('\n');
 }
 
@@ -789,17 +797,72 @@ function normalizeProspectTargetMarkets(value) {
   return compactText(String(value || '').replace(/[、，]/g, ', '));
 }
 
-function addSeenProspect(state, draft) {
+function addSeenProspect(state, prospect) {
   if (!Array.isArray(state.seenProspects)) {
     state.seenProspects = [];
   }
 
-  for (const value of [draft.website, draft.email, draft.company]) {
-    const item = compactText(value);
+  for (const item of getProspectSeenValues(prospect)) {
     if (item && !state.seenProspects.includes(item)) {
       state.seenProspects.push(item);
     }
   }
+}
+
+function isSeenProspect(prospect, seenKeys) {
+  return getProspectSeenValues(prospect)
+    .map(normalizeSeenProspectKey)
+    .some((key) => key && seenKeys.has(key));
+}
+
+function buildSeenProspectKeySet(state = {}) {
+  return new Set((state.seenProspects || [])
+    .flatMap((value) => getProspectSeenValues({ website: value, email: value, contactUrl: value, company: value }))
+    .map(normalizeSeenProspectKey)
+    .filter(Boolean));
+}
+
+function getProspectSeenValues(prospect = {}) {
+  return [
+    prospect.website,
+    prospect.contactUrl,
+    prospect.email,
+    prospect.company,
+    extractHostname(prospect.website),
+    extractHostname(prospect.contactUrl),
+    extractEmailDomain(prospect.email)
+  ].map(compactText).filter(Boolean);
+}
+
+function normalizeSeenProspectKey(value) {
+  const text = compactText(value).toLowerCase();
+  if (!text) {
+    return '';
+  }
+
+  return text
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .replace(/\/+$/, '');
+}
+
+function extractHostname(value) {
+  const text = compactText(value);
+  if (!text) {
+    return '';
+  }
+
+  try {
+    return new URL(text.startsWith('http') ? text : `https://${text}`).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+function extractEmailDomain(value) {
+  const text = compactText(value);
+  const match = text.match(/@([^@\s<>]+)$/);
+  return match ? match[1] : '';
 }
 
 function compactText(text) {
