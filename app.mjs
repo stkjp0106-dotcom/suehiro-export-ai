@@ -1,5 +1,10 @@
 import './server.mjs';
 import {
+  getGoogleConfig,
+  resolveTokenPath
+} from './src/google-drive.mjs';
+
+import {
   getGmailMonitorConfig,
   runGmailMonitor,
   validateGmailMonitorConfig
@@ -10,7 +15,9 @@ import {
   validateProspectMonitorConfig
 } from './src/prospect-monitor.mjs';
 
+const sharedGoogleTokenPath = resolveTokenPath(getGoogleConfig(process.env));
 const gmailConfig = getGmailMonitorConfig();
+gmailConfig.google.tokenPath = sharedGoogleTokenPath;
 const gmailMissing = validateGmailMonitorConfig(gmailConfig);
 
 if (gmailMissing.length) {
@@ -24,6 +31,7 @@ if (gmailMissing.length) {
 }
 
 const prospectConfig = getProspectMonitorConfig();
+prospectConfig.google.tokenPath = sharedGoogleTokenPath;
 const prospectMissing = validateProspectMonitorConfig(prospectConfig);
 
 if (!prospectConfig.enabled) {
