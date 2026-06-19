@@ -870,4 +870,6 @@ test('notifyLineAboutGoogleReauth includes the public auth URL in LINE', async (
   assert.equal(calls[0].body.to, 'line-group-id');
   assert.match(calls[0].body.messages[0].text, /Google認証が切れています。/);
   assert.match(calls[0].body.messages[0].text, /https:\/\/example\.up\.railway\.app\/google\/auth/);
+  assert.match(calls[0].body.messages[0].text, /LINEアプリ内ブラウザ/);
+  assert.match(calls[0].body.messages[0].text, /Safari\/Chrome/);
 });

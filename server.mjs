@@ -551,6 +551,10 @@ function buildGoogleReauthMessage(reason) {
     '下記URLからGoogle再認証してください。',
     getGoogleAuthUrlForLine(),
     '',
+    '重要: LINEアプリ内ブラウザではGoogleにブロックされます。',
+    'URLをコピーしてSafari/Chromeで開くか、画面右下メニューから外部ブラウザで開いてください。',
+    'Googleアカウントは sales@suehirotrd.com を選んでください。',
+    '',
     '再認証後、もう一度同じ操作を送ってください。'
   ].join('\n');
 }
